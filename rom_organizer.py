@@ -12,8 +12,12 @@ import sys
 import shutil
 import hashlib
 import argparse
+import zipfile
+import threading
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
 
 
 # Common ROM file extensions by platform
@@ -57,15 +61,12 @@ BIOS_KEYWORDS = [
 # Pre-computed set of all ROM extensions for efficient lookup
 ALL_ROM_EXTENSIONS = set(ext for exts in ROM_EXTENSIONS.values() for ext in exts)
 
-# Directories to exclude from scanning (case-insensitive)
-EXCLUDED_DIRS = [
+# Directories to exclude from scanning (pre-converted to lowercase for efficient lookup)
+EXCLUDED_DIRS_SET = {
     'imgs', 'images', 'img', 'artwork', 'art', 'covers', 'cover',
     'screenshots', 'screenshot', 'snaps', 'snap', 'preview', 'previews',
     'videos', 'video', 'manuals', 'manual', 'docs', 'documentation'
-]
-
-# Global verbosity level
-VERBOSE = False
+}
 
 # ROM header signatures for platform detection
 # Format: platform -> list of (offset, signature_bytes)
@@ -133,6 +134,37 @@ def detect_platform_from_header(filepath: Path) -> Optional[str]:
     return None
 
 
+def is_zip_archive(filepath: Path) -> bool:
+    """Check if a file is a valid ZIP archive."""
+    try:
+        return zipfile.is_zipfile(filepath)
+    except Exception:
+        return False
+
+
+def inspect_zip_contents(filepath: Path, verbose: bool = False) -> Optional[str]:
+    """
+    Inspect ZIP file contents to detect platform.
+    Returns the first ROM file extension found inside the ZIP.
+    """
+    try:
+        with zipfile.ZipFile(filepath, 'r') as zf:
+            for name in zf.namelist():
+                # Skip directories
+                if name.endswith('/'):
+                    continue
+                
+                ext = Path(name).suffix.lower()
+                if ext in ALL_ROM_EXTENSIONS:
+                    if verbose:
+                        print(f"      Found ROM in ZIP: {name} ({ext})")
+                    return ext
+    except Exception as e:
+        if verbose:
+            print(f"      Error reading ZIP: {e}")
+    return None
+
+
 def calculate_hash(filepath: Path, algorithm: str = 'md5') -> str:
     """Calculate hash of a file."""
     try:
@@ -148,15 +180,75 @@ def calculate_hash(filepath: Path, algorithm: str = 'md5') -> str:
     return hash_func.hexdigest()
 
 
+def calculate_hash_worker(filepath: Path, algorithm: str) -> Tuple[Path, str, Optional[str]]:
+    """
+    Worker function for multithreaded hash calculation.
+    Returns tuple of (filepath, hash_value, error_message).
+    """
+    try:
+        hash_value = calculate_hash(filepath, algorithm)
+        return (filepath, hash_value, None)
+    except Exception as e:
+        return (filepath, "", str(e))
+
+
+def calculate_hashes_multithreaded(files: List[Path], algorithm: str = 'md5', 
+                                   max_workers: int = 4, verbose: bool = False) -> Dict[Path, str]:
+    """
+    Calculate hashes for multiple files using thread pool.
+    
+    Args:
+        files: List of file paths to hash
+        algorithm: Hash algorithm to use
+        max_workers: Number of concurrent threads
+        verbose: Show progress
+    
+    Returns:
+        Dictionary mapping file paths to their hashes
+    """
+    results = {}
+    total = len(files)
+    
+    if verbose:
+        print(f"\n  Calculating {algorithm.upper()} hashes using {max_workers} threads...")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all hash calculation jobs
+        future_to_file = {
+            executor.submit(calculate_hash_worker, filepath, algorithm): filepath 
+            for filepath in files
+        }
+        
+        # Process completed hashes
+        completed = 0
+        for future in as_completed(future_to_file):
+            filepath, hash_value, error = future.result()
+            completed += 1
+            
+            if error:
+                if verbose:
+                    print(f"    Error hashing {filepath.name}: {error}")
+            else:
+                results[filepath] = hash_value
+                if verbose and completed % 10 == 0:
+                    print(f"    Progress: {completed}/{total} files hashed")
+    
+    if verbose:
+        print(f"    Completed: {len(results)}/{total} files hashed successfully")
+    
+    return results
+
+
 def is_bios_file(filename: str) -> bool:
     """Check if a file is likely a BIOS file based on its name."""
     filename_lower = filename.lower()
     return any(keyword in filename_lower for keyword in BIOS_KEYWORDS)
 
 
-def detect_platform(filepath: Path, extension: str) -> Optional[str]:
+def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Optional[str]:
     """
     Detect the platform for a ROM file based on header signature, extension, and path.
+    Supports ZIP files by inspecting their contents.
     Returns the platform name or None if unknown.
     """
     # Check parent directory names for platform hints (highest priority)
@@ -167,8 +259,21 @@ def detect_platform(filepath: Path, extension: str) -> Optional[str]:
         if platform in parent_parts:
             return platform
     
-    # Try header-based detection for files with ambiguous extensions
     ext_lower = extension.lower()
+    
+    # Handle ZIP files - inspect contents to detect platform
+    if ext_lower == '.zip':
+        if is_zip_archive(filepath):
+            inner_ext = inspect_zip_contents(filepath, verbose)
+            if inner_ext:
+                # Try to detect platform from the ROM file inside the ZIP
+                for platform, extensions in ROM_EXTENSIONS.items():
+                    if inner_ext in extensions:
+                        return platform
+        # If we can't determine from contents, treat as arcade/MAME ROM
+        return 'arcade'
+    
+    # Try header-based detection for files with ambiguous extensions
     if ext_lower in ['.bin', '.iso', '.img']:
         # These extensions are shared across platforms, try header detection
         header_platform = detect_platform_from_header(filepath)
@@ -195,7 +300,7 @@ def detect_platform(filepath: Path, extension: str) -> Optional[str]:
     return None
 
 
-def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[str, List[Path]]:
+def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: bool = False) -> Dict[str, List[Path]]:
     """
     Recursively scan a directory for ROM and BIOS files.
     Returns a dictionary mapping platforms to lists of files.
@@ -203,6 +308,7 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[st
     Args:
         source_dir: Source directory to scan
         max_files: Maximum number of files to process (None for unlimited)
+        verbose: Enable verbose output
     """
     results = {
         'roms': {},
@@ -220,11 +326,11 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[st
         
         # Filter out excluded directories (modify dirs in-place to prevent os.walk from entering them)
         original_dirs = dirs.copy()
-        dirs[:] = [d for d in dirs if d.lower() not in EXCLUDED_DIRS]
+        dirs[:] = [d for d in dirs if d.lower() not in EXCLUDED_DIRS_SET]
         
         # Track skipped directories
-        skipped = [d for d in original_dirs if d.lower() in EXCLUDED_DIRS]
-        if skipped and VERBOSE:
+        skipped = [d for d in original_dirs if d.lower() in EXCLUDED_DIRS_SET]
+        if skipped and verbose:
             for skipped_dir in skipped:
                 results['skipped_dirs'].append(root_path / skipped_dir)
                 print(f"  Skipping directory: {root_path / skipped_dir}")
@@ -232,7 +338,7 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[st
         for filename in files:
             # Check file limit
             if max_files is not None and files_processed >= max_files:
-                if VERBOSE:
+                if verbose:
                     print(f"\nReached file limit of {max_files} files")
                 return results
             
@@ -241,18 +347,18 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[st
             
             # Skip non-ROM files
             if not extension:
-                if VERBOSE:
+                if verbose:
                     print(f"  Skipping (no extension): {filename}")
                 continue
             
-            if VERBOSE:
+            if verbose:
                 print(f"  Scanning: {filepath}")
             
             # Detect platform
-            platform = detect_platform(filepath, extension)
+            platform = detect_platform(filepath, extension, verbose)
             
             if platform:
-                if VERBOSE:
+                if verbose:
                     print(f"    Detected platform: {platform}")
                 
                 # Determine if it's a BIOS file
@@ -269,7 +375,7 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[st
             else:
                 # Unknown platform
                 if extension.lower() in ALL_ROM_EXTENSIONS:
-                    if VERBOSE:
+                    if verbose:
                         print(f"    Unknown platform for: {filename}")
                     results['unknown'].append(filepath)
                     files_processed += 1
@@ -279,7 +385,8 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[st
 
 def organize_files(results: Dict, target_dir: Path, dry_run: bool = False, 
                    copy_mode: bool = False, calculate_hashes: bool = False,
-                   hash_algorithm: str = 'md5'):
+                   hash_algorithm: str = 'md5', use_multithreading: bool = False,
+                   max_workers: int = 4, verbose: bool = False):
     """
     Organize the scanned files into the target directory structure.
     
@@ -290,8 +397,14 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         copy_mode: If True, copy files instead of moving them
         calculate_hashes: If True, calculate and display file hashes
         hash_algorithm: Hash algorithm to use ('md5', 'sha1', 'sha256')
+        use_multithreading: If True, calculate hashes in parallel after moving
+        max_workers: Number of threads for parallel hashing
+        verbose: Enable verbose output
     """
     action = "Would copy" if dry_run and copy_mode else "Would move" if dry_run else "Copying" if copy_mode else "Moving"
+    
+    # Collect files to hash later (for multithreaded mode)
+    files_to_hash = []
     
     # Organize ROMs
     print(f"\n{action} ROMs:")
@@ -305,13 +418,6 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         for filepath in files:
             dest_path = platform_dir / filepath.name
             
-            if calculate_hashes:
-                file_hash = calculate_hash(filepath, hash_algorithm)
-                hash_label = hash_algorithm.upper()
-                print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
-            else:
-                print(f"    {action}: {filepath.name}")
-            
             if not dry_run:
                 if dest_path.exists():
                     print(f"      Warning: {dest_path.name} already exists, skipping")
@@ -321,6 +427,25 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     shutil.copy2(filepath, dest_path)
                 else:
                     shutil.move(str(filepath), str(dest_path))
+                
+                # Track for hashing after move if multithreading enabled
+                if calculate_hashes and use_multithreading:
+                    files_to_hash.append(dest_path)
+                elif calculate_hashes:
+                    # Calculate hash immediately if not multithreading
+                    file_hash = calculate_hash(dest_path, hash_algorithm)
+                    hash_label = hash_algorithm.upper()
+                    print(f"    Moved: {filepath.name} ({hash_label}: {file_hash})")
+                else:
+                    print(f"    Moved: {filepath.name}")
+            else:
+                # Dry run mode
+                if calculate_hashes and not use_multithreading:
+                    file_hash = calculate_hash(filepath, hash_algorithm)
+                    hash_label = hash_algorithm.upper()
+                    print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
+                else:
+                    print(f"    {action}: {filepath.name}")
     
     # Organize BIOS files
     if results['bios']:
@@ -335,13 +460,6 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
             for filepath in files:
                 dest_path = platform_dir / filepath.name
                 
-                if calculate_hashes:
-                    file_hash = calculate_hash(filepath, hash_algorithm)
-                    hash_label = hash_algorithm.upper()
-                    print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
-                else:
-                    print(f"    {action}: {filepath.name}")
-                
                 if not dry_run:
                     if dest_path.exists():
                         print(f"      Warning: {dest_path.name} already exists, skipping")
@@ -351,12 +469,41 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         shutil.copy2(filepath, dest_path)
                     else:
                         shutil.move(str(filepath), str(dest_path))
+                    
+                    # Track for hashing
+                    if calculate_hashes and use_multithreading:
+                        files_to_hash.append(dest_path)
+                    elif calculate_hashes:
+                        file_hash = calculate_hash(dest_path, hash_algorithm)
+                        hash_label = hash_algorithm.upper()
+                        print(f"    Moved: {filepath.name} ({hash_label}: {file_hash})")
+                    else:
+                        print(f"    Moved: {filepath.name}")
+                else:
+                    # Dry run mode
+                    if calculate_hashes and not use_multithreading:
+                        file_hash = calculate_hash(filepath, hash_algorithm)
+                        hash_label = hash_algorithm.upper()
+                        print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
+                    else:
+                        print(f"    {action}: {filepath.name}")
+    
+    # Calculate hashes in parallel if multithreading enabled
+    if files_to_hash and use_multithreading and not dry_run:
+        print(f"\nCalculating hashes for {len(files_to_hash)} files using {max_workers} threads...")
+        hash_results = calculate_hashes_multithreaded(files_to_hash, hash_algorithm, max_workers, verbose)
+        
+        # Display results
+        print(f"\n{hash_algorithm.upper()} Hashes:")
+        for filepath, file_hash in hash_results.items():
+            print(f"  {filepath.name}: {file_hash}")
     
     # Report unknown files
     if results['unknown']:
         print(f"\nUnknown platform files ({len(results['unknown'])} files):")
         for filepath in results['unknown']:
             print(f"  {filepath}")
+
 
 
 def main():
@@ -385,6 +532,9 @@ Examples:
   
   # Process only first 100 files (useful for testing)
   python rom_organizer.py /path/to/roms /path/to/organized --limit 100 --dry-run
+  
+  # Use multithreaded hashing after moving files (faster for large collections)
+  python rom_organizer.py /path/to/roms /path/to/organized --hash --multithreaded --threads 8
         """
     )
     
@@ -403,12 +553,14 @@ Examples:
                        help='Enable verbose output showing detailed scanning progress')
     parser.add_argument('--limit', type=int, default=None,
                        help='Limit the number of files to process (useful for testing)')
+    parser.add_argument('--multithreaded', action='store_true',
+                       help='Use multithreaded hashing after moving files (faster for large collections)')
+    parser.add_argument('--threads', type=int, default=4,
+                       help='Number of threads for multithreaded hashing (default: 4)')
     
     args = parser.parse_args()
     
-    # Set global verbosity
-    global VERBOSE
-    VERBOSE = args.verbose
+    verbose = args.verbose
     
     source_dir = Path(args.source).resolve()
     target_dir = Path(args.target).resolve()
@@ -428,12 +580,14 @@ Examples:
         sys.exit(1)
     
     # Scan for ROMs
-    if VERBOSE:
+    if verbose:
         print(f"Verbose mode enabled")
         if args.limit:
             print(f"Processing limit: {args.limit} files")
+        if args.multithreaded and args.hash:
+            print(f"Multithreaded hashing enabled ({args.threads} threads)")
     
-    results = scan_directory(source_dir, max_files=args.limit)
+    results = scan_directory(source_dir, max_files=args.limit, verbose=verbose)
     
     # Summary
     total_roms = sum(len(files) for files in results['roms'].values())
@@ -445,7 +599,7 @@ Examples:
     print(f"  Total BIOS files found: {total_bios}")
     print(f"  Unknown files: {len(results['unknown'])}")
     print(f"  Platforms detected: {len(set(list(results['roms'].keys()) + list(results['bios'].keys())))}")
-    if VERBOSE and results.get('skipped_dirs'):
+    if verbose and results.get('skipped_dirs'):
         print(f"  Directories skipped: {len(results['skipped_dirs'])}")
     if args.limit:
         print(f"  File limit applied: {args.limit}")
@@ -463,7 +617,10 @@ Examples:
                   dry_run=args.dry_run, 
                   copy_mode=args.copy,
                   calculate_hashes=args.hash,
-                  hash_algorithm=args.hash_algorithm)
+                  hash_algorithm=args.hash_algorithm,
+                  use_multithreading=args.multithreaded,
+                  max_workers=args.threads,
+                  verbose=verbose)
     
     if args.dry_run:
         print("\n*** DRY RUN COMPLETE - Run without --dry-run to actually organize files ***")

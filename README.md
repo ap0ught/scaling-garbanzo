@@ -7,7 +7,9 @@ A Python tool to organize your game ROM collection into a clean, platform-based 
 - 🗂️ **Automatic Organization**: Scans directories recursively and organizes ROMs by platform
 - 🎮 **Multi-Platform Support**: Supports 20+ gaming platforms (NES, SNES, PlayStation, Genesis, etc.)
 - 🔬 **Header Detection**: Reads ROM file headers to reliably identify platforms even with ambiguous extensions
+- 📦 **ZIP File Support**: Detects ROM types inside ZIP archives (arcade, MAME, etc.)
 - 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with RetroAchievements and Redump
+- ⚡ **Multithreaded Hashing**: Calculate hashes in parallel after moving files for faster processing
 - 🧬 **BIOS Detection**: Automatically identifies and separates BIOS files from game ROMs
 - 🚫 **Smart Directory Exclusion**: Automatically skips media directories (imgs, artwork, screenshots, etc.)
 - 🔍 **Dry Run Mode**: Preview changes before actually moving files
@@ -83,6 +85,9 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --verbose --dry-r
 
 # Process only first 100 files (testing)
 python rom_organizer.py /path/to/messy/roms /path/to/organized --limit 100 --dry-run
+
+# Use multithreaded hashing (faster for large collections)
+python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --multithreaded --threads 8
 ```
 
 ### Command-Line Options
@@ -97,6 +102,8 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --limit 100 --dry
 | `--hash-algorithm` | Hash algorithm: `md5`, `sha1`, or `sha256` (default: `md5`) |
 | `-v`, `--verbose` | Enable verbose output showing detailed scanning progress |
 | `--limit` | Limit the number of files to process (useful for testing) |
+| `--multithreaded` | Use multithreaded hashing after moving files (faster) |
+| `--threads` | Number of threads for multithreaded hashing (default: 4) |
 
 ### Examples
 
@@ -252,6 +259,39 @@ The tool automatically skips common media directories to avoid moving non-ROM fi
 **Example**: If you have a structure like `\GB\imgs\`, the `imgs` directory will be skipped and its contents won't be moved.
 
 Use `--verbose` mode to see which directories are being skipped during scanning.
+
+## ZIP File Support
+
+The tool handles ZIP archives intelligently:
+- **Inspects ZIP contents**: Opens ZIP files to detect ROM types inside
+- **Arcade/MAME ROMs**: ZIP files are commonly used for arcade games and are automatically organized into `arcade` platform
+- **ROM detection**: If the ZIP contains identifiable ROM files (by extension), the tool will try to detect the platform
+- **Preserved format**: ZIP files are moved as-is, not extracted
+
+**Example**: A ZIP file containing `.bin` files in an arcade directory will be organized as an arcade ROM.
+
+## Multithreaded Hashing
+
+For large ROM collections, hash calculation can be slow. The tool supports multithreaded hashing:
+
+```bash
+# Move files first, then calculate hashes in parallel
+python rom_organizer.py /roms /organized --hash --multithreaded --threads 8
+```
+
+**Benefits:**
+- Moves files quickly without waiting for hash calculation
+- Calculates hashes in parallel using multiple CPU cores
+- Displays all hashes together after processing
+- Ideal for large collections (100+ files)
+
+**How it works:**
+1. Files are moved/copied to destination first
+2. Hash calculation happens in parallel using thread pool
+3. Progress is shown during calculation
+4. All hashes are displayed at the end
+
+Use `--threads N` to control the number of parallel hash calculations (default: 4).
 
 ## Contributing
 
