@@ -9,9 +9,11 @@ A Python tool to organize your game ROM collection into a clean, platform-based 
 - 🔬 **Header Detection**: Reads ROM file headers to reliably identify platforms even with ambiguous extensions
 - 📦 **ZIP File Support**: Detects ROM types inside ZIP archives (arcade, MAME, etc.)
 - 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with RetroAchievements and Redump
+- 🔄 **Duplicate Detection**: Identifies duplicate ROMs by hash across platforms
 - ⚡ **Multithreaded Hashing**: Calculate hashes in parallel after moving files for faster processing
 - 🧬 **BIOS Detection**: Automatically identifies and separates BIOS files from game ROMs
 - 🚫 **Smart Directory Exclusion**: Automatically skips media directories (imgs, artwork, screenshots, etc.)
+- 🏷️ **Platform Display**: Shows platform name for each file being processed
 - 🔍 **Dry Run Mode**: Preview changes before actually moving files
 - 📋 **Copy Mode**: Option to copy files instead of moving them
 - 📊 **Verbose Mode**: Detailed scanning progress output
@@ -292,6 +294,46 @@ python rom_organizer.py /roms /organized --hash --multithreaded --threads 8
 4. All hashes are displayed at the end
 
 Use `--threads N` to control the number of parallel hash calculations (default: 4).
+
+## Duplicate Detection
+
+When using hash calculation (`--hash`), the tool automatically detects duplicate ROMs:
+
+```bash
+python rom_organizer.py /roms /organized --hash --hash-algorithm sha1 --dry-run
+```
+
+**Output example:**
+```
+  Platform: psx (2 files)
+    Would move: Castlevania X.iso [Platform: PSX] (SHA1: ecdb3675c7238c0e94d256801aa7655b24f47cac)
+    Would move: Bomberman (US).iso [Platform: PSX] (SHA1: c514eace1667e74c959ec218d7e12f46dc7754b9)
+
+  Platform: ps2 (1 files)
+    ⚠️  Duplicate: Bomberman (US).iso [Platform: PS2] (SHA1: c514eace1667e74c959ec218d7e12f46dc7754b9) - same as Bomberman (US).iso [PSX]
+```
+
+**Features:**
+- Detects duplicate files by comparing hashes
+- Shows which file it's a duplicate of and from which platform
+- Works across different platforms (e.g., a ROM mistakenly in PS2 folder that's actually a PSX game)
+- Prevents moving duplicate files (skips them with a warning)
+- Platform name shown in square brackets for easy identification: `[Platform: PSX]`
+
+**Duplicate types detected:**
+1. **Filename duplicates**: Files with the same name already in destination
+2. **Hash duplicates**: Different filenames but identical content (detected via hash)
+
+## Platform Display
+
+All output now shows the platform for each file being processed:
+
+```
+Would move: game.iso [Platform: PSX]
+Moved: rom.nes [Platform: NES]
+```
+
+This makes it clear which platform each ROM belongs to, especially helpful when organizing large collections.
 
 ## Contributing
 

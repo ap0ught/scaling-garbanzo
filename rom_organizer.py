@@ -406,6 +406,9 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
     # Collect files to hash later (for multithreaded mode)
     files_to_hash = []
     
+    # Track seen hashes for duplicate detection
+    seen_hashes = {}  # hash -> (platform, filename)
+    
     # Organize ROMs
     print(f"\n{action} ROMs:")
     for platform, files in results['roms'].items():
@@ -418,9 +421,12 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         for filepath in files:
             dest_path = platform_dir / filepath.name
             
+            # Check if destination already exists (duplicate filename)
+            is_duplicate_name = dest_path.exists() if not dry_run else False
+            
             if not dry_run:
-                if dest_path.exists():
-                    print(f"      Warning: {dest_path.name} already exists, skipping")
+                if is_duplicate_name:
+                    print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
                     continue
                 
                 if copy_mode:
@@ -430,22 +436,36 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 
                 # Track for hashing after move if multithreading enabled
                 if calculate_hashes and use_multithreading:
-                    files_to_hash.append(dest_path)
+                    files_to_hash.append((dest_path, platform))
                 elif calculate_hashes:
                     # Calculate hash immediately if not multithreading
                     file_hash = calculate_hash(dest_path, hash_algorithm)
                     hash_label = hash_algorithm.upper()
-                    print(f"    Moved: {filepath.name} ({hash_label}: {file_hash})")
+                    
+                    # Check for duplicate hash
+                    if file_hash in seen_hashes:
+                        dup_platform, dup_file = seen_hashes[file_hash]
+                        print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                    else:
+                        print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                        seen_hashes[file_hash] = (platform, filepath.name)
                 else:
-                    print(f"    Moved: {filepath.name}")
+                    print(f"    Moved: {filepath.name} [Platform: {platform.upper()}]")
             else:
                 # Dry run mode
                 if calculate_hashes and not use_multithreading:
                     file_hash = calculate_hash(filepath, hash_algorithm)
                     hash_label = hash_algorithm.upper()
-                    print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
+                    
+                    # Check for duplicate hash
+                    if file_hash in seen_hashes:
+                        dup_platform, dup_file = seen_hashes[file_hash]
+                        print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                    else:
+                        print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                        seen_hashes[file_hash] = (platform, filepath.name)
                 else:
-                    print(f"    {action}: {filepath.name}")
+                    print(f"    {action}: {filepath.name} [Platform: {platform.upper()}]")
     
     # Organize BIOS files
     if results['bios']:
@@ -460,9 +480,11 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
             for filepath in files:
                 dest_path = platform_dir / filepath.name
                 
+                is_duplicate_name = dest_path.exists() if not dry_run else False
+                
                 if not dry_run:
-                    if dest_path.exists():
-                        print(f"      Warning: {dest_path.name} already exists, skipping")
+                    if is_duplicate_name:
+                        print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
                         continue
                     
                     if copy_mode:
@@ -472,31 +494,56 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     
                     # Track for hashing
                     if calculate_hashes and use_multithreading:
-                        files_to_hash.append(dest_path)
+                        files_to_hash.append((dest_path, platform))
                     elif calculate_hashes:
                         file_hash = calculate_hash(dest_path, hash_algorithm)
                         hash_label = hash_algorithm.upper()
-                        print(f"    Moved: {filepath.name} ({hash_label}: {file_hash})")
+                        
+                        # Check for duplicate hash
+                        if file_hash in seen_hashes:
+                            dup_platform, dup_file = seen_hashes[file_hash]
+                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        else:
+                            print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                            seen_hashes[file_hash] = (platform, filepath.name)
                     else:
-                        print(f"    Moved: {filepath.name}")
+                        print(f"    Moved: {filepath.name} [Platform: {platform.upper()}]")
                 else:
                     # Dry run mode
                     if calculate_hashes and not use_multithreading:
                         file_hash = calculate_hash(filepath, hash_algorithm)
                         hash_label = hash_algorithm.upper()
-                        print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
+                        
+                        # Check for duplicate hash
+                        if file_hash in seen_hashes:
+                            dup_platform, dup_file = seen_hashes[file_hash]
+                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        else:
+                            print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                            seen_hashes[file_hash] = (platform, filepath.name)
                     else:
-                        print(f"    {action}: {filepath.name}")
+                        print(f"    {action}: {filepath.name} [Platform: {platform.upper()}]")
     
     # Calculate hashes in parallel if multithreading enabled
     if files_to_hash and use_multithreading and not dry_run:
         print(f"\nCalculating hashes for {len(files_to_hash)} files using {max_workers} threads...")
-        hash_results = calculate_hashes_multithreaded(files_to_hash, hash_algorithm, max_workers, verbose)
+        # Extract just the paths for hashing
+        paths_only = [path for path, _ in files_to_hash]
+        hash_results = calculate_hashes_multithreaded(paths_only, hash_algorithm, max_workers, verbose)
         
-        # Display results
+        # Display results with platform info and duplicate detection
         print(f"\n{hash_algorithm.upper()} Hashes:")
-        for filepath, file_hash in hash_results.items():
-            print(f"  {filepath.name}: {file_hash}")
+        for dest_path, platform in files_to_hash:
+            if dest_path in hash_results:
+                file_hash = hash_results[dest_path]
+                
+                # Check for duplicates
+                if file_hash in seen_hashes:
+                    dup_platform, dup_file = seen_hashes[file_hash]
+                    print(f"  ⚠️  Duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_algorithm.upper()}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                else:
+                    print(f"  {dest_path.name} [Platform: {platform.upper()}]: {file_hash}")
+                    seen_hashes[file_hash] = (platform, dest_path.name)
     
     # Report unknown files
     if results['unknown']:
