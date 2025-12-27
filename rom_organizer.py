@@ -57,6 +57,16 @@ BIOS_KEYWORDS = [
 # Pre-computed set of all ROM extensions for efficient lookup
 ALL_ROM_EXTENSIONS = set(ext for exts in ROM_EXTENSIONS.values() for ext in exts)
 
+# Directories to exclude from scanning (case-insensitive)
+EXCLUDED_DIRS = [
+    'imgs', 'images', 'img', 'artwork', 'art', 'covers', 'cover',
+    'screenshots', 'screenshot', 'snaps', 'snap', 'preview', 'previews',
+    'videos', 'video', 'manuals', 'manual', 'docs', 'documentation'
+]
+
+# Global verbosity level
+VERBOSE = False
+
 # ROM header signatures for platform detection
 # Format: platform -> list of (offset, signature_bytes)
 ROM_HEADERS = {
@@ -185,34 +195,66 @@ def detect_platform(filepath: Path, extension: str) -> Optional[str]:
     return None
 
 
-def scan_directory(source_dir: Path) -> Dict[str, List[Path]]:
+def scan_directory(source_dir: Path, max_files: Optional[int] = None) -> Dict[str, List[Path]]:
     """
     Recursively scan a directory for ROM and BIOS files.
     Returns a dictionary mapping platforms to lists of files.
+    
+    Args:
+        source_dir: Source directory to scan
+        max_files: Maximum number of files to process (None for unlimited)
     """
     results = {
         'roms': {},
         'bios': {},
-        'unknown': []
+        'unknown': [],
+        'skipped_dirs': []
     }
     
     print(f"Scanning directory: {source_dir}")
     
+    files_processed = 0
+    
     for root, dirs, files in os.walk(source_dir):
         root_path = Path(root)
         
+        # Filter out excluded directories (modify dirs in-place to prevent os.walk from entering them)
+        original_dirs = dirs.copy()
+        dirs[:] = [d for d in dirs if d.lower() not in EXCLUDED_DIRS]
+        
+        # Track skipped directories
+        skipped = [d for d in original_dirs if d.lower() in EXCLUDED_DIRS]
+        if skipped and VERBOSE:
+            for skipped_dir in skipped:
+                results['skipped_dirs'].append(root_path / skipped_dir)
+                print(f"  Skipping directory: {root_path / skipped_dir}")
+        
         for filename in files:
+            # Check file limit
+            if max_files is not None and files_processed >= max_files:
+                if VERBOSE:
+                    print(f"\nReached file limit of {max_files} files")
+                return results
+            
             filepath = root_path / filename
             extension = filepath.suffix
             
             # Skip non-ROM files
             if not extension:
+                if VERBOSE:
+                    print(f"  Skipping (no extension): {filename}")
                 continue
+            
+            if VERBOSE:
+                print(f"  Scanning: {filepath}")
             
             # Detect platform
             platform = detect_platform(filepath, extension)
             
             if platform:
+                if VERBOSE:
+                    print(f"    Detected platform: {platform}")
+                
                 # Determine if it's a BIOS file
                 if is_bios_file(filename):
                     if platform not in results['bios']:
@@ -222,10 +264,15 @@ def scan_directory(source_dir: Path) -> Dict[str, List[Path]]:
                     if platform not in results['roms']:
                         results['roms'][platform] = []
                     results['roms'][platform].append(filepath)
+                
+                files_processed += 1
             else:
                 # Unknown platform
                 if extension.lower() in ALL_ROM_EXTENSIONS:
+                    if VERBOSE:
+                        print(f"    Unknown platform for: {filename}")
                     results['unknown'].append(filepath)
+                    files_processed += 1
     
     return results
 
@@ -332,6 +379,12 @@ Examples:
   
   # Organize files with hash calculation
   python rom_organizer.py /path/to/roms /path/to/organized --hash --copy
+  
+  # Verbose mode to see detailed scanning progress
+  python rom_organizer.py /path/to/roms /path/to/organized --verbose --dry-run
+  
+  # Process only first 100 files (useful for testing)
+  python rom_organizer.py /path/to/roms /path/to/organized --limit 100 --dry-run
         """
     )
     
@@ -346,8 +399,16 @@ Examples:
     parser.add_argument('--hash-algorithm', type=str, default='md5',
                        choices=['md5', 'sha1', 'sha256'],
                        help='Hash algorithm to use (default: md5, use sha1 for RetroAchievements)')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='Enable verbose output showing detailed scanning progress')
+    parser.add_argument('--limit', type=int, default=None,
+                       help='Limit the number of files to process (useful for testing)')
     
     args = parser.parse_args()
+    
+    # Set global verbosity
+    global VERBOSE
+    VERBOSE = args.verbose
     
     source_dir = Path(args.source).resolve()
     target_dir = Path(args.target).resolve()
@@ -367,7 +428,12 @@ Examples:
         sys.exit(1)
     
     # Scan for ROMs
-    results = scan_directory(source_dir)
+    if VERBOSE:
+        print(f"Verbose mode enabled")
+        if args.limit:
+            print(f"Processing limit: {args.limit} files")
+    
+    results = scan_directory(source_dir, max_files=args.limit)
     
     # Summary
     total_roms = sum(len(files) for files in results['roms'].values())
@@ -379,6 +445,10 @@ Examples:
     print(f"  Total BIOS files found: {total_bios}")
     print(f"  Unknown files: {len(results['unknown'])}")
     print(f"  Platforms detected: {len(set(list(results['roms'].keys()) + list(results['bios'].keys())))}")
+    if VERBOSE and results.get('skipped_dirs'):
+        print(f"  Directories skipped: {len(results['skipped_dirs'])}")
+    if args.limit:
+        print(f"  File limit applied: {args.limit}")
     print(f"{'='*60}")
     
     if total_roms == 0 and total_bios == 0:

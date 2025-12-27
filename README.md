@@ -9,8 +9,11 @@ A Python tool to organize your game ROM collection into a clean, platform-based 
 - 🔬 **Header Detection**: Reads ROM file headers to reliably identify platforms even with ambiguous extensions
 - 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with RetroAchievements and Redump
 - 🧬 **BIOS Detection**: Automatically identifies and separates BIOS files from game ROMs
+- 🚫 **Smart Directory Exclusion**: Automatically skips media directories (imgs, artwork, screenshots, etc.)
 - 🔍 **Dry Run Mode**: Preview changes before actually moving files
 - 📋 **Copy Mode**: Option to copy files instead of moving them
+- 📊 **Verbose Mode**: Detailed scanning progress output
+- 🎯 **File Limiting**: Process a limited number of files for testing
 
 ## Directory Structure
 
@@ -74,6 +77,12 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --hash
 
 # Calculate SHA-1 hashes (for RetroAchievements)
 python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --hash-algorithm sha1
+
+# Verbose mode to see detailed progress
+python rom_organizer.py /path/to/messy/roms /path/to/organized --verbose --dry-run
+
+# Process only first 100 files (testing)
+python rom_organizer.py /path/to/messy/roms /path/to/organized --limit 100 --dry-run
 ```
 
 ### Command-Line Options
@@ -86,6 +95,8 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --hash-alg
 | `--copy` | Copy files instead of moving them |
 | `--hash` | Calculate and display hashes for ROM verification |
 | `--hash-algorithm` | Hash algorithm: `md5`, `sha1`, or `sha256` (default: `md5`) |
+| `-v`, `--verbose` | Enable verbose output showing detailed scanning progress |
+| `--limit` | Limit the number of files to process (useful for testing) |
 
 ### Examples
 
@@ -226,6 +237,21 @@ BIOS files are automatically identified by common keywords:
 - system
 - scph (PlayStation BIOS)
 - ps- (PlayStation prefix)
+
+## Directory Exclusion
+
+The tool automatically skips common media directories to avoid moving non-ROM files:
+- `imgs`, `images`, `img` - Image files, artwork
+- `covers`, `cover` - Game cover art
+- `screenshots`, `screenshot`, `snaps`, `snap` - Screenshots
+- `artwork`, `art` - Artwork and graphics
+- `videos`, `video` - Video files
+- `manuals`, `manual`, `docs`, `documentation` - Manuals and documentation
+- `preview`, `previews` - Preview images
+
+**Example**: If you have a structure like `\GB\imgs\`, the `imgs` directory will be skipped and its contents won't be moved.
+
+Use `--verbose` mode to see which directories are being skipped during scanning.
 
 ## Contributing
 

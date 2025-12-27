@@ -88,6 +88,9 @@ After running the organizer, your files will be in:
 4. **Use --hash with MD5** (default) for Redump database verification
 5. The tool reads ROM headers to reliably detect platforms even with ambiguous file extensions
 6. Keep source ROMs in platform folders for better detection when header signatures are unavailable
+7. **Use --verbose** to see detailed progress and which directories are being skipped
+8. **Use --limit** for testing on large collections (e.g., `--limit 100` processes first 100 files)
+9. Media directories (imgs, artwork, screenshots) are automatically skipped
 
 ## Common Issues
 
