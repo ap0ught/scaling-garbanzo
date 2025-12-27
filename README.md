@@ -6,7 +6,8 @@ A Python tool to organize your game ROM collection into a clean, platform-based 
 
 - 🗂️ **Automatic Organization**: Scans directories recursively and organizes ROMs by platform
 - 🎮 **Multi-Platform Support**: Supports 20+ gaming platforms (NES, SNES, PlayStation, Genesis, etc.)
-- 🔐 **Hash Calculation**: Calculate MD5/SHA1 hashes for ROM verification with RetroAchievements and Redump
+- 🔬 **Header Detection**: Reads ROM file headers to reliably identify platforms even with ambiguous extensions
+- 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with RetroAchievements and Redump
 - 🧬 **BIOS Detection**: Automatically identifies and separates BIOS files from game ROMs
 - 🔍 **Dry Run Mode**: Preview changes before actually moving files
 - 📋 **Copy Mode**: Option to copy files instead of moving them
@@ -70,6 +71,9 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --copy
 
 # Calculate MD5 hashes for verification
 python rom_organizer.py /path/to/messy/roms /path/to/organized --hash
+
+# Calculate SHA-1 hashes (for RetroAchievements)
+python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --hash-algorithm sha1
 ```
 
 ### Command-Line Options
@@ -80,7 +84,8 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --hash
 | `target` | Target directory for organized ROMs (required) |
 | `--dry-run` | Show what would be done without actually moving files |
 | `--copy` | Copy files instead of moving them |
-| `--hash` | Calculate and display MD5 hashes for ROM verification |
+| `--hash` | Calculate and display hashes for ROM verification |
+| `--hash-algorithm` | Hash algorithm: `md5`, `sha1`, or `sha256` (default: `md5`) |
 
 ### Examples
 
@@ -89,9 +94,9 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --hash
 python rom_organizer.py ~/Downloads/roms ~/RetroGaming/organized --dry-run
 ```
 
-**Organize with hash calculation (for RetroAchievements verification):**
+**Organize with SHA-1 hash calculation (for RetroAchievements verification):**
 ```bash
-python rom_organizer.py ~/Downloads/roms ~/RetroGaming/organized --hash --copy
+python rom_organizer.py ~/Downloads/roms ~/RetroGaming/organized --hash --hash-algorithm sha1 --copy
 ```
 
 **Move files and organize:**
@@ -138,35 +143,77 @@ The tool automatically detects and organizes ROMs for the following platforms:
 
 ## Hash Verification
 
-The tool can calculate MD5 hashes to help verify your ROMs against databases like:
+The tool supports multiple hash algorithms for ROM verification:
+
+### Supported Hash Algorithms
+- **MD5**: Standard checksum for general verification
+- **SHA-1**: Used by RetroAchievements for achievement compatibility
+- **SHA-256**: Modern cryptographic hash for enhanced security
 
 ### Tools to Find/Check Hashes
-- **RetroAchievements (RA) Hasher (RAHasher)**: Verify ROMs are compatible with RetroAchievements
-- **ROM Vault/Redump**: Check ROM dumps against verified databases
+- **RetroAchievements (RA) Hasher (RAHasher)**: A command-line tool for finding hashes for achievement compatibility. Use SHA-1 with `--hash-algorithm sha1`
+- **ROM Vault/Redump**: Databases with verified hashes for physical game dumps. Typically uses MD5 or SHA-1
 - **No-Intro**: Validate your collection against No-Intro DAT files
 
-Example with hash calculation:
+### Examples
+
+**Calculate MD5 hashes (Redump/general):**
 ```bash
 python rom_organizer.py ~/roms ~/organized --hash --dry-run
 ```
 
-Output will include:
-```
-Moving: Super Mario Bros.nes (MD5: 811b027eaf99c2def7b933c5208636de)
+**Calculate SHA-1 hashes (RetroAchievements):**
+```bash
+python rom_organizer.py ~/roms ~/organized --hash --hash-algorithm sha1 --dry-run
 ```
 
-You can then verify these hashes against RetroAchievements or Redump databases.
+**Calculate SHA-256 hashes:**
+```bash
+python rom_organizer.py ~/roms ~/organized --hash --hash-algorithm sha256 --dry-run
+```
+
+Output examples:
+```
+Moving: Super Mario Bros.nes (MD5: 811b027eaf99c2def7b933c5208636de)
+Moving: Legend of Zelda.nes (SHA1: 6681ccb20167f68c60ce5f6d3e044feef78f79ab)
+```
+
+You can then verify these hashes against RetroAchievements, Redump, or other ROM verification databases.
 
 ## Platform Detection
 
-The tool uses two methods to detect platforms:
+The tool uses multiple methods to detect platforms for accurate organization:
 
-1. **File Extension**: Matches common ROM extensions to platforms
-2. **Directory Structure**: Looks for platform names in the source path
+### Detection Methods (in priority order)
 
-For best results:
+1. **Directory Structure**: Platform names in the source path (highest priority)
+   - Example: `/roms/nes/game.bin` → detected as NES
+
+2. **ROM Header Detection**: Reads file headers to identify platform signatures
+   - **NES**: Checks for 'NES\x1a' header signature
+   - **N64**: Detects big-endian, byte-swapped, and little-endian formats
+   - **Game Boy/GBC**: Verifies Nintendo logo in header
+   - **Genesis/Master System**: Looks for 'SEGA' signatures
+   - **PlayStation**: Checks for system area signatures
+   - And more...
+
+3. **File Extension**: Matches common ROM extensions to platforms (fallback)
+
+### Why Header Detection?
+
+Many ROM formats share the same file extensions (`.bin`, `.iso`, `.img`), making extension-based detection unreliable. Header detection reads the actual ROM data to identify the platform accurately.
+
+**Example**: A `.bin` file could be:
+- Game Boy Advance ROM
+- Sega Genesis ROM
+- PlayStation disc image
+- Atari 2600 ROM
+
+The tool reads the file header to determine which platform it actually belongs to.
+
+### For Best Results:
+- Keep ROMs in platform-specific folders when possible
 - Use standard ROM file extensions
-- Keep ROMs in platform-specific folders in your source directory
 - BIOS files are automatically detected by filename keywords (bios, boot, firmware, scph, etc.)
 
 ## BIOS File Detection

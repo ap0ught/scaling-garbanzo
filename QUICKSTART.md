@@ -36,7 +36,17 @@ python rom_organizer.py /path/to/your/roms /path/to/organized --hash --copy
 ```
 
 This will:
-- Calculate MD5 hash for each file
+- Calculate MD5 hash for each file (default)
+- Display hashes for verification with Redump
+- Copy files to organized structure
+
+### 4. Organize with SHA-1 hashes (for RetroAchievements)
+```bash
+python rom_organizer.py /path/to/your/roms /path/to/organized --hash --hash-algorithm sha1 --copy
+```
+
+This will:
+- Calculate SHA-1 hash for each file
 - Display hashes for verification with RetroAchievements
 - Copy files to organized structure
 
@@ -49,8 +59,8 @@ python rom_organizer.py ~/Downloads/roms ~/RetroGaming --dry-run
 # Step 2: Copy files to organized structure
 python rom_organizer.py ~/Downloads/roms ~/RetroGaming --copy
 
-# Step 3: Verify with hashes (optional)
-python rom_organizer.py ~/Downloads/roms ~/RetroGaming --hash --dry-run
+# Step 3: Verify with SHA-1 hashes for RetroAchievements (optional)
+python rom_organizer.py ~/Downloads/roms ~/RetroGaming --hash --hash-algorithm sha1 --dry-run
 ```
 
 ## Result Structure
@@ -74,9 +84,10 @@ After running the organizer, your files will be in:
 
 1. **Always start with --dry-run** to preview changes
 2. **Use --copy** to keep your originals safe
-3. **Use --hash** to verify ROMs for RetroAchievements
-4. Keep source ROMs in platform folders for better detection
-5. BIOS files are automatically detected and separated
+3. **Use --hash with --hash-algorithm sha1** to verify ROMs for RetroAchievements compatibility
+4. **Use --hash with MD5** (default) for Redump database verification
+5. The tool reads ROM headers to reliably detect platforms even with ambiguous file extensions
+6. Keep source ROMs in platform folders for better detection when header signatures are unavailable
 
 ## Common Issues
 

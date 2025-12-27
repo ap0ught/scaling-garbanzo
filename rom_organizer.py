@@ -57,6 +57,69 @@ BIOS_KEYWORDS = [
 # Pre-computed set of all ROM extensions for efficient lookup
 ALL_ROM_EXTENSIONS = set(ext for exts in ROM_EXTENSIONS.values() for ext in exts)
 
+# ROM header signatures for platform detection
+# Format: platform -> list of (offset, signature_bytes)
+ROM_HEADERS = {
+    'nes': [(0, b'NES\x1a')],
+    'snes': [
+        # SNES ROMs may have a 512-byte SMC header, check for known patterns
+        (0x7FC0, None),  # Internal header location (no-header ROM)
+        (0x81C0, None),  # Internal header location (with SMC header)
+    ],
+    'n64': [
+        (0, b'\x80\x37\x12\x40'),  # Big-endian (z64)
+        (0, b'\x37\x80\x40\x12'),  # Byte-swapped (v64)
+        (0, b'\x40\x12\x37\x80'),  # Little-endian (n64)
+    ],
+    'gba': [(0xA0, b'\x96')],  # Nintendo logo check
+    'gb': [(0x104, b'\xCE\xED\x66\x66\xCC\x0D')],  # Nintendo logo start
+    'gbc': [(0x104, b'\xCE\xED\x66\x66\xCC\x0D')],  # Same as GB
+    'genesis': [
+        (0x100, b'SEGA'),  # Sega Genesis header
+        (0x100, b'SEGADISCSYSTEM'),  # Sega CD
+    ],
+    'mastersystem': [(0x7FF0, b'TMR SEGA')],
+    'psx': [
+        # PSX discs use .cue + .bin, check for specific patterns in bin files
+        (0x9320, b'PLAYSTATION'),  # Common location in system area
+    ],
+    'saturn': [(0, b'SEGA SEGASATURN')],
+    'dreamcast': [(0, b'SEGA SEGAKATANA')],
+}
+
+
+def read_file_header(filepath: Path, offset: int, length: int) -> Optional[bytes]:
+    """Read bytes from a file at a specific offset."""
+    try:
+        with open(filepath, 'rb') as f:
+            f.seek(offset)
+            return f.read(length)
+    except (IOError, OSError):
+        return None
+
+
+def detect_platform_from_header(filepath: Path) -> Optional[str]:
+    """
+    Detect platform by reading ROM file headers.
+    Returns platform name or None if no match found.
+    """
+    for platform, signatures in ROM_HEADERS.items():
+        for offset, signature in signatures:
+            if signature is None:
+                continue
+            
+            header_data = read_file_header(filepath, offset, len(signature))
+            if header_data and header_data == signature:
+                return platform
+            
+            # For some platforms, check if signature appears anywhere in the header
+            if platform in ['genesis', 'mastersystem']:
+                header_data = read_file_header(filepath, offset, 256)
+                if header_data and signature in header_data:
+                    return platform
+    
+    return None
+
 
 def calculate_hash(filepath: Path, algorithm: str = 'md5') -> str:
     """Calculate hash of a file."""
@@ -81,10 +144,10 @@ def is_bios_file(filename: str) -> bool:
 
 def detect_platform(filepath: Path, extension: str) -> Optional[str]:
     """
-    Detect the platform for a ROM file based on extension and path.
+    Detect the platform for a ROM file based on header signature, extension, and path.
     Returns the platform name or None if unknown.
     """
-    # Check parent directory names for platform hints
+    # Check parent directory names for platform hints (highest priority)
     parent_parts = [p.lower() for p in filepath.parts]
     
     # Try to match platform from directory structure
@@ -92,13 +155,26 @@ def detect_platform(filepath: Path, extension: str) -> Optional[str]:
         if platform in parent_parts:
             return platform
     
-    # Try to match by extension
+    # Try header-based detection for files with ambiguous extensions
     ext_lower = extension.lower()
+    if ext_lower in ['.bin', '.iso', '.img']:
+        # These extensions are shared across platforms, try header detection
+        header_platform = detect_platform_from_header(filepath)
+        if header_platform:
+            return header_platform
+    
+    # For cartridge-based systems, always try header detection
+    if ext_lower in ['.nes', '.gba', '.gb', '.gbc', '.z64', '.n64', '.v64', '.smd', '.gen', '.sms']:
+        header_platform = detect_platform_from_header(filepath)
+        if header_platform:
+            return header_platform
+    
+    # Try to match by extension (fallback)
     for platform, extensions in ROM_EXTENSIONS.items():
         if ext_lower in extensions:
             # If multiple platforms share an extension, prefer more specific detection
-            if ext_lower in ['.bin', '.iso']:
-                # These are generic, try to detect from path
+            if ext_lower in ['.bin', '.iso', '.cue', '.img']:
+                # These are generic, try to detect from path first
                 for platform_name in ROM_EXTENSIONS.keys():
                     if platform_name in parent_parts:
                         return platform_name
@@ -153,7 +229,8 @@ def scan_directory(source_dir: Path) -> Dict[str, List[Path]]:
 
 
 def organize_files(results: Dict, target_dir: Path, dry_run: bool = False, 
-                   copy_mode: bool = False, calculate_hashes: bool = False):
+                   copy_mode: bool = False, calculate_hashes: bool = False,
+                   hash_algorithm: str = 'md5'):
     """
     Organize the scanned files into the target directory structure.
     
@@ -163,6 +240,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         dry_run: If True, only show what would be done without moving files
         copy_mode: If True, copy files instead of moving them
         calculate_hashes: If True, calculate and display file hashes
+        hash_algorithm: Hash algorithm to use ('md5', 'sha1', 'sha256')
     """
     action = "Would copy" if dry_run and copy_mode else "Would move" if dry_run else "Copying" if copy_mode else "Moving"
     
@@ -179,8 +257,9 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
             dest_path = platform_dir / filepath.name
             
             if calculate_hashes:
-                file_hash = calculate_hash(filepath)
-                print(f"    {action}: {filepath.name} (MD5: {file_hash})")
+                file_hash = calculate_hash(filepath, hash_algorithm)
+                hash_label = hash_algorithm.upper()
+                print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
             else:
                 print(f"    {action}: {filepath.name}")
             
@@ -208,8 +287,9 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 dest_path = platform_dir / filepath.name
                 
                 if calculate_hashes:
-                    file_hash = calculate_hash(filepath)
-                    print(f"    {action}: {filepath.name} (MD5: {file_hash})")
+                    file_hash = calculate_hash(filepath, hash_algorithm)
+                    hash_label = hash_algorithm.upper()
+                    print(f"    {action}: {filepath.name} ({hash_label}: {file_hash})")
                 else:
                     print(f"    {action}: {filepath.name}")
                 
@@ -245,6 +325,9 @@ Examples:
   # Calculate and display MD5 hashes
   python rom_organizer.py /path/to/roms /path/to/organized --hash
   
+  # Calculate SHA-1 hashes (for RetroAchievements)
+  python rom_organizer.py /path/to/roms /path/to/organized --hash --hash-algorithm sha1
+  
   # Organize files with hash calculation
   python rom_organizer.py /path/to/roms /path/to/organized --hash --copy
         """
@@ -257,7 +340,10 @@ Examples:
     parser.add_argument('--copy', action='store_true',
                        help='Copy files instead of moving them')
     parser.add_argument('--hash', action='store_true',
-                       help='Calculate and display MD5 hashes for verification')
+                       help='Calculate and display hashes for verification')
+    parser.add_argument('--hash-algorithm', type=str, default='md5',
+                       choices=['md5', 'sha1', 'sha256'],
+                       help='Hash algorithm to use (default: md5, use sha1 for RetroAchievements)')
     
     args = parser.parse_args()
     
@@ -304,7 +390,8 @@ Examples:
     organize_files(results, target_dir, 
                   dry_run=args.dry_run, 
                   copy_mode=args.copy,
-                  calculate_hashes=args.hash)
+                  calculate_hashes=args.hash,
+                  hash_algorithm=args.hash_algorithm)
     
     if args.dry_run:
         print("\n*** DRY RUN COMPLETE - Run without --dry-run to actually organize files ***")
