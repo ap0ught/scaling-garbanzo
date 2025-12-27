@@ -7,7 +7,10 @@ A Python tool to organize your game ROM collection into a clean, platform-based 
 - 🗂️ **Automatic Organization**: Scans directories recursively and organizes ROMs by platform
 - 🎮 **Multi-Platform Support**: Supports 20+ gaming platforms (NES, SNES, PlayStation, Genesis, etc.)
 - 🔬 **Header Detection**: Reads ROM file headers to reliably identify platforms even with ambiguous extensions
-- 📦 **ZIP File Support**: Detects ROM types inside ZIP archives (arcade, MAME, etc.)
+- 📦 **Archive Support**: Handles ZIP, 7z, and RAR archives for arcade/MAME ROMs
+- 📃 **Playlist Support**: Recognizes .m3u playlist files for multi-disc games
+- 🔤 **System Aliases**: Accepts multiple naming conventions (ps1→psx, tg16→pcengine, megadrive→genesis)
+- 🎯 **Format Preferences**: Smart ordering prefers CHD over ISO/BIN, native ROM formats over generic bins
 - 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with RetroAchievements and Redump
 - 🔄 **Duplicate Detection**: Identifies duplicate ROMs by hash across platforms
 - ⚡ **Multithreaded Hashing**: Calculate hashes in parallel after moving files for faster processing
@@ -262,15 +265,68 @@ The tool automatically skips common media directories to avoid moving non-ROM fi
 
 Use `--verbose` mode to see which directories are being skipped during scanning.
 
-## ZIP File Support
+## Archive Support
 
-The tool handles ZIP archives intelligently:
-- **Inspects ZIP contents**: Opens ZIP files to detect ROM types inside
-- **Arcade/MAME ROMs**: ZIP files are commonly used for arcade games and are automatically organized into `arcade` platform
-- **ROM detection**: If the ZIP contains identifiable ROM files (by extension), the tool will try to detect the platform
-- **Preserved format**: ZIP files are moved as-is, not extracted
+The tool handles multiple archive formats intelligently:
 
-**Example**: A ZIP file containing `.bin` files in an arcade directory will be organized as an arcade ROM.
+### Supported Archive Formats
+- **ZIP** (`.zip`)
+- **7-Zip** (`.7z`)
+- **RAR** (`.rar`)
+
+### How it works
+- **Inspects archive contents**: Opens archives to detect ROM types inside
+- **Arcade/MAME ROMs**: Archive files are commonly used for arcade games and are automatically organized into `arcade` platform
+- **ROM detection**: If the archive contains identifiable ROM files (by extension), the tool will try to detect the platform
+- **Preserved format**: Archives are moved as-is, not extracted
+
+**Example**: A `.7z` file containing `.bin` files in an arcade directory will be organized as an arcade ROM.
+
+## System Aliases
+
+The tool accepts multiple naming conventions for the same platform:
+
+| Alias | Canonical Platform |
+|-------|-------------------|
+| `ps1`, `psone` | `psx` |
+| `tg16`, `turbografx16`, `pce` | `pcengine` |
+| `pcecd` | `pcenginecd` |
+| `megadrive`, `md` | `genesis` |
+| `dc` | `dreamcast` |
+| `sms` | `mastersystem` |
+| `gg` | `gamegear` |
+
+**Example**: ROMs in a directory named `/ps1/` will be organized as PlayStation (psx) ROMs.
+
+## Format Preferences
+
+The tool includes smart format ordering for when multiple versions of the same game exist:
+
+### Disc-Based Systems
+- **Prefers**: CHD → ISO/CSO → CUE/BIN
+- **Reason**: CHD is more compressed and efficient
+- **Systems**: PlayStation, PS2, PSP, Dreamcast, Saturn, Sega CD, PC Engine CD, 3DO
+
+### Cartridge-Based Systems
+- **Prefers**: Native formats (`.nes`, `.sfc`, `.z64`) → Generic `.bin`
+- **Reason**: Native formats have proper headers and metadata
+- **Systems**: NES, SNES, N64, Game Boy, GBA, NDS
+
+### Arcade Systems
+- **Prefers**: ZIP → 7z → RAR
+- **Systems**: MAME, FBA, Neo Geo, Arcade
+
+### Playlist Support
+Multi-disc games often use `.m3u` playlist files to group disc images together. The tool recognizes these for:
+- PlayStation (PSX)
+- PlayStation 2 (PS2)
+- Sega CD
+- Saturn
+- Dreamcast
+- PC Engine CD
+- 3DO
+
+**Example**: `Final Fantasy VII.m3u` along with its disc `.bin`/`.cue` files will all be organized together.
 
 ## Multithreaded Hashing
 

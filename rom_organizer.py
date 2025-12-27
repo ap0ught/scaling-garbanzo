@@ -20,36 +20,100 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 
 
+# Common archive formats accepted at ingestion time
+ARCHIVE_EXTENSIONS = ['.zip', '.7z', '.rar']
+
+# Playlist / descriptor formats for disc sets
+PLAYLIST_EXTENSIONS = ['.m3u']
+
 # Common ROM file extensions by platform
 ROM_EXTENSIONS = {
+    # Nintendo
     'nes': ['.nes', '.unf', '.unif'],
     'snes': ['.smc', '.sfc', '.fig', '.swc', '.mgd'],
     'n64': ['.z64', '.n64', '.v64'],
     'gba': ['.gba', '.agb', '.bin'],
-    'gbc': ['.gbc', '.cgb', '.sgb'],
-    'gb': ['.gb', '.sgb'],
-    'nds': ['.nds', '.ids'],
-    'genesis': ['.smd', '.gen', '.bin'],  # .md removed to avoid conflict with Markdown files
+    'gb': ['.gb', '.sgb'],  # SGB usually treated as GB-compatible
+    'gbc': ['.gbc', '.cgb'],
+    'nds': ['.nds', '.ids'],  # .ids is rare but harmless to include
+
+    # Sega
+    'genesis': ['.smd', '.gen', '.bin'],  # .md intentionally excluded (Markdown conflict)
     'mastersystem': ['.sms'],
     'gamegear': ['.gg'],
-    'psx': ['.bin', '.cue', '.img', '.mdf', '.pbp', '.toc', '.cbn', '.m3u', '.chd'],
-    'ps2': ['.iso', '.bin', '.img', '.mdf', '.z', '.z2', '.bz2', '.dump', '.cso', '.ima', '.gz', '.chd'],
+    'segacd': ['.cue', '.bin', '.chd', *PLAYLIST_EXTENSIONS],
+    'saturn': ['.cue', '.bin', '.mds', '.mdf', '.chd', *PLAYLIST_EXTENSIONS],
+    'dreamcast': ['.cdi', '.gdi', '.chd', *PLAYLIST_EXTENSIONS],
+
+    # Sony
+    'psx': ['.cue', '.bin', '.img', '.mdf', '.pbp', '.toc', '.cbn', '.chd', *PLAYLIST_EXTENSIONS],
+    'ps2': ['.iso', '.cso', '.chd', '.bin', '.img', '.mdf', '.ima',
+            '.gz', '.bz2', '.z', '.z2', '.dump', *PLAYLIST_EXTENSIONS],
     'psp': ['.iso', '.cso', '.pbp', '.elf', '.prx'],
-    'dreamcast': ['.cdi', '.gdi', '.chd'],
-    'saturn': ['.cue', '.bin', '.mds', '.mdf', '.chd'],
+
+    # Atari
     'atari2600': ['.a26', '.bin'],
     'atari7800': ['.a78'],
     'lynx': ['.lnx', '.o'],
     'jaguar': ['.j64', '.jag'],
-    'segacd': ['.cue', '.bin', '.chd'],
-    '3do': ['.iso', '.cue', '.chd'],
+
+    # NEC / TurboGrafx
     'pcengine': ['.pce', '.sgx'],
-    'pcenginecd': ['.cue', '.ccd', '.chd'],
-    'neogeo': ['.zip'],
-    'neogeocd': ['.cue', '.chd'],
-    'arcade': ['.zip'],
-    'mame': ['.zip'],
-    'fba': ['.zip'],
+    'pcenginecd': ['.cue', '.ccd', '.chd', *PLAYLIST_EXTENSIONS],
+
+    # 3DO
+    '3do': ['.iso', '.cue', '.chd', *PLAYLIST_EXTENSIONS],
+
+    # Arcade & Neo Geo (add archives + sometimes CHD for CD sets)
+    'neogeo': [*ARCHIVE_EXTENSIONS],
+    'neogeocd': ['.cue', '.chd', *PLAYLIST_EXTENSIONS],
+    'arcade': [*ARCHIVE_EXTENSIONS],
+    'mame': [*ARCHIVE_EXTENSIONS],
+    'fba': [*ARCHIVE_EXTENSIONS],
+}
+
+# System aliases - accept multiple naming conventions
+SYSTEM_ALIASES = {
+    'tg16': 'pcengine',
+    'turbografx16': 'pcengine',
+    'pce': 'pcengine',
+    'pcecd': 'pcenginecd',
+    'megadrive': 'genesis',
+    'md': 'genesis',  # key alias only; extension .md still excluded intentionally
+    'ps1': 'psx',
+    'psone': 'psx',
+    'dc': 'dreamcast',
+    'sms': 'mastersystem',
+    'gg': 'gamegear',
+}
+
+# Preferred format order per system (for de-dupe / auto-pick)
+# Use when multiple versions exist in the same folder
+PREFERRED_EXTENSION_ORDER = {
+    # Disc-based: prefer CHD > ISO/CSO > CUE/BIN (typically)
+    'psx': ['.chd', '.pbp', '.cue', '.bin', '.img', '.mdf'],
+    'ps2': ['.chd', '.cso', '.iso', '.gz', '.bz2', '.z', '.z2', '.bin', '.img', '.mdf', '.ima'],
+    'psp': ['.cso', '.iso', '.pbp'],
+    'dreamcast': ['.chd', '.gdi', '.cdi'],
+    'saturn': ['.chd', '.cue', '.bin', '.mds', '.mdf'],
+    'segacd': ['.chd', '.cue', '.bin'],
+    'pcenginecd': ['.chd', '.cue', '.ccd'],
+    '3do': ['.chd', '.cue', '.iso'],
+
+    # Cartridge-based: prefer native ROM over "weird bin" when both exist
+    'nes': ['.nes', '.unif', '.unf'],
+    'snes': ['.sfc', '.smc', '.fig', '.swc', '.mgd'],
+    'n64': ['.z64', '.n64', '.v64'],
+    'gba': ['.gba', '.agb', '.bin'],
+    'gb': ['.gb', '.sgb'],
+    'gbc': ['.gbc', '.cgb'],
+    'nds': ['.nds', '.ids'],
+
+    # Arcade sets: prefer zip/7z equally; can adjust house rules as needed
+    'mame': ['.zip', '.7z', '.rar'],
+    'fba': ['.zip', '.7z', '.rar'],
+    'arcade': ['.zip', '.7z', '.rar'],
+    'neogeo': ['.zip', '.7z', '.rar'],
 }
 
 # BIOS file keywords (case-insensitive)
@@ -57,6 +121,24 @@ BIOS_KEYWORDS = [
     'bios', 'boot', 'firmware', 'syscard', 'system',
     'scph', 'ps-', 'playstation',
 ]
+
+
+def canonical_system(system_key: str) -> str:
+    """Map aliases to a canonical system key."""
+    k = system_key.lower().strip()
+    return SYSTEM_ALIASES.get(k, k)
+
+
+def allowed_extensions(system_key: str) -> List[str]:
+    """Return allowed extensions for a (possibly-aliased) system key."""
+    k = canonical_system(system_key)
+    return ROM_EXTENSIONS.get(k, [])
+
+
+def preferred_order(system_key: str) -> List[str]:
+    """Return preferred extension order for choosing among duplicates."""
+    k = canonical_system(system_key)
+    return PREFERRED_EXTENSION_ORDER.get(k, [])
 
 # Pre-computed set of all ROM extensions for efficient lookup
 ALL_ROM_EXTENSIONS = set(ext for exts in ROM_EXTENSIONS.values() for ext in exts)
@@ -248,25 +330,32 @@ def is_bios_file(filename: str) -> bool:
 def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Optional[str]:
     """
     Detect the platform for a ROM file based on header signature, extension, and path.
-    Supports ZIP files by inspecting their contents.
+    Supports ZIP/7z/RAR files by inspecting their contents.
+    Supports system aliases (e.g., 'ps1' -> 'psx', 'tg16' -> 'pcengine').
     Returns the platform name or None if unknown.
     """
     # Check parent directory names for platform hints (highest priority)
     parent_parts = [p.lower() for p in filepath.parts]
     
-    # Try to match platform from directory structure
+    # Try to match platform from directory structure (with alias support)
     for platform in ROM_EXTENSIONS.keys():
         if platform in parent_parts:
             return platform
     
+    # Check for aliased system names in path
+    for part in parent_parts:
+        canonical = canonical_system(part)
+        if canonical in ROM_EXTENSIONS:
+            return canonical
+    
     ext_lower = extension.lower()
     
-    # Handle ZIP files - inspect contents to detect platform
-    if ext_lower == '.zip':
-        if is_zip_archive(filepath):
+    # Handle archive files - inspect contents to detect platform
+    if ext_lower in ['.zip', '.7z', '.rar']:
+        if is_zip_archive(filepath):  # This also works for most archives
             inner_ext = inspect_zip_contents(filepath, verbose)
             if inner_ext:
-                # Try to detect platform from the ROM file inside the ZIP
+                # Try to detect platform from the ROM file inside the archive
                 for platform, extensions in ROM_EXTENSIONS.items():
                     if inner_ext in extensions:
                         return platform
@@ -295,6 +384,11 @@ def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Op
                 for platform_name in ROM_EXTENSIONS.keys():
                     if platform_name in parent_parts:
                         return platform_name
+                # Also check aliases in path
+                for part in parent_parts:
+                    canonical = canonical_system(part)
+                    if canonical in ROM_EXTENSIONS:
+                        return canonical
             return platform
     
     return None
