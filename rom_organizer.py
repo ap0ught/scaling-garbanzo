@@ -61,11 +61,6 @@ ALL_ROM_EXTENSIONS = set(ext for exts in ROM_EXTENSIONS.values() for ext in exts
 # Format: platform -> list of (offset, signature_bytes)
 ROM_HEADERS = {
     'nes': [(0, b'NES\x1a')],
-    'snes': [
-        # SNES ROMs may have a 512-byte SMC header, check for known patterns
-        (0x7FC0, None),  # Internal header location (no-header ROM)
-        (0x81C0, None),  # Internal header location (with SMC header)
-    ],
     'n64': [
         (0, b'\x80\x37\x12\x40'),  # Big-endian (z64)
         (0, b'\x37\x80\x40\x12'),  # Byte-swapped (v64)
@@ -75,13 +70,16 @@ ROM_HEADERS = {
     'gb': [(0x104, b'\xCE\xED\x66\x66\xCC\x0D')],  # Nintendo logo start
     'gbc': [(0x104, b'\xCE\xED\x66\x66\xCC\x0D')],  # Same as GB
     'genesis': [
-        (0x100, b'SEGA'),  # Sega Genesis header
-        (0x100, b'SEGADISCSYSTEM'),  # Sega CD
+        (0x100, b'SEGADISCSYSTEM'),  # Sega CD (check longer signature first)
+        (0x100, b'SEGA MEGA DRIVE'),  # Genesis with full header
+        (0x100, b'SEGA GENESIS'),  # Genesis US name
+        (0x100, b'SEGA'),  # Generic Sega (check last)
     ],
     'mastersystem': [(0x7FF0, b'TMR SEGA')],
     'psx': [
         # PSX discs use .cue + .bin, check for specific patterns in bin files
         (0x9320, b'PLAYSTATION'),  # Common location in system area
+        (0x9340, b'LICENSED BY SONY'),  # Alternative location
     ],
     'saturn': [(0, b'SEGA SEGASATURN')],
     'dreamcast': [(0, b'SEGA SEGAKATANA')],
@@ -105,17 +103,21 @@ def detect_platform_from_header(filepath: Path) -> Optional[str]:
     """
     for platform, signatures in ROM_HEADERS.items():
         for offset, signature in signatures:
-            if signature is None:
+            # Read a reasonable amount of data to check for signature
+            # Use max 512 bytes to handle various header locations
+            read_length = max(len(signature), 512) if signature else 512
+            header_data = read_file_header(filepath, offset, read_length)
+            
+            if not header_data:
                 continue
             
-            header_data = read_file_header(filepath, offset, len(signature))
-            if header_data and header_data == signature:
+            # Check for exact match at offset
+            if signature and header_data[:len(signature)] == signature:
                 return platform
             
-            # For some platforms, check if signature appears anywhere in the header
-            if platform in ['genesis', 'mastersystem']:
-                header_data = read_file_header(filepath, offset, 256)
-                if header_data and signature in header_data:
+            # For some platforms, signature might be slightly offset within the region
+            if platform in ['genesis', 'mastersystem'] and signature:
+                if signature in header_data:
                     return platform
     
     return None
