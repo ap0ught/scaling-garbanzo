@@ -13,9 +13,11 @@ A Python tool to organize your game ROM collection into a clean, platform-based 
 - 🎯 **Format Preferences**: Smart ordering prefers CHD over ISO/BIN, native ROM formats over generic bins
 - 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with RetroAchievements and Redump
 - 🔄 **Duplicate Detection**: Identifies duplicate ROMs by hash across platforms
+- 🗑️ **Delete Duplicates**: Automatically delete duplicate files with `--delete-duplicates`
 - ⚡ **Multithreaded Hashing**: Calculate hashes in parallel after moving files for faster processing
 - 🧬 **BIOS Detection**: Automatically identifies and separates BIOS files from game ROMs
 - 🚫 **Smart Directory Exclusion**: Automatically skips media directories (imgs, artwork, screenshots, etc.)
+- 🖼️ **Include Images Option**: Optionally include image/media directories with `--include-images`
 - 🏷️ **Platform Display**: Shows platform name for each file being processed
 - 🔍 **Dry Run Mode**: Preview changes before actually moving files
 - 📋 **Copy Mode**: Option to copy files instead of moving them
@@ -93,6 +95,12 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --limit 100 --dry
 
 # Use multithreaded hashing (faster for large collections)
 python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --multithreaded --threads 8
+
+# Include image directories (move imgs, artwork, etc.)
+python rom_organizer.py /path/to/messy/roms /path/to/organized --include-images
+
+# Delete duplicate files automatically
+python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --delete-duplicates
 ```
 
 ### Command-Line Options
@@ -109,6 +117,8 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --multithr
 | `--limit` | Limit the number of files to process (useful for testing) |
 | `--multithreaded` | Use multithreaded hashing after moving files (faster) |
 | `--threads` | Number of threads for multithreaded hashing (default: 4) |
+| `--include-images` | Include image/media directories instead of excluding them |
+| `--delete-duplicates` | Delete duplicate files instead of skipping them (requires `--hash`) |
 
 ### Examples
 
@@ -265,6 +275,21 @@ The tool automatically skips common media directories to avoid moving non-ROM fi
 
 Use `--verbose` mode to see which directories are being skipped during scanning.
 
+### Including Image Directories
+
+If you want to move image/media directories along with your ROMs, use the `--include-images` flag:
+
+```bash
+python rom_organizer.py /roms /organized --include-images
+```
+
+This will include all directories that would normally be excluded (imgs, artwork, screenshots, etc.) and organize their contents by platform.
+
+**Use cases:**
+- Moving an entire ROM collection including artwork/screenshots
+- Backing up complete ROM sets with all media files
+- Reorganizing a collection where images are organized by platform
+
 ## Archive Support
 
 The tool handles multiple archive formats intelligently:
@@ -373,12 +398,44 @@ python rom_organizer.py /roms /organized --hash --hash-algorithm sha1 --dry-run
 - Detects duplicate files by comparing hashes
 - Shows which file it's a duplicate of and from which platform
 - Works across different platforms (e.g., a ROM mistakenly in PS2 folder that's actually a PSX game)
-- Prevents moving duplicate files (skips them with a warning)
+- Prevents moving duplicate files (skips them with a warning by default)
 - Platform name shown in square brackets for easy identification: `[Platform: PSX]`
 
 **Duplicate types detected:**
 1. **Filename duplicates**: Files with the same name already in destination
 2. **Hash duplicates**: Different filenames but identical content (detected via hash)
+
+### Deleting Duplicates Automatically
+
+Use the `--delete-duplicates` flag to automatically delete duplicate files instead of just warning about them:
+
+```bash
+python rom_organizer.py /roms /organized --hash --delete-duplicates
+```
+
+**Output example:**
+```
+  Platform: nes (1 files)
+    Would move: game1.nes [Platform: NES] (MD5: 5570629d24c9f035bbb7ba308a1e2aab)
+
+  Platform: psx (1 files)
+    🗑️  Deleting duplicate: game1.iso [Platform: PSX] (MD5: 5570629d24c9f035bbb7ba308a1e2aab) - same as game1.nes [NES]
+
+🗑️  Deleted 1 duplicate file(s)
+```
+
+**Important notes:**
+- Requires `--hash` to be enabled (cannot delete duplicates without hash verification)
+- Only deletes files that are exact duplicates (same hash)
+- First file encountered is kept, subsequent duplicates are deleted
+- Use `--dry-run` first to preview what would be deleted
+- Deleted files are removed permanently
+
+**Safety:**
+Always use `--dry-run` first to verify which files would be deleted:
+```bash
+python rom_organizer.py /roms /organized --hash --delete-duplicates --dry-run
+```
 
 ## Platform Display
 

@@ -394,7 +394,8 @@ def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Op
     return None
 
 
-def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: bool = False) -> Dict[str, List[Path]]:
+def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: bool = False,
+                   include_images: bool = False) -> Dict[str, List[Path]]:
     """
     Recursively scan a directory for ROM and BIOS files.
     Returns a dictionary mapping platforms to lists of files.
@@ -403,6 +404,7 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: b
         source_dir: Source directory to scan
         max_files: Maximum number of files to process (None for unlimited)
         verbose: Enable verbose output
+        include_images: If True, include image/media directories instead of excluding them
     """
     results = {
         'roms': {},
@@ -418,16 +420,17 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: b
     for root, dirs, files in os.walk(source_dir):
         root_path = Path(root)
         
-        # Filter out excluded directories (modify dirs in-place to prevent os.walk from entering them)
-        original_dirs = dirs.copy()
-        dirs[:] = [d for d in dirs if d.lower() not in EXCLUDED_DIRS_SET]
-        
-        # Track skipped directories
-        skipped = [d for d in original_dirs if d.lower() in EXCLUDED_DIRS_SET]
-        if skipped and verbose:
-            for skipped_dir in skipped:
-                results['skipped_dirs'].append(root_path / skipped_dir)
-                print(f"  Skipping directory: {root_path / skipped_dir}")
+        # Filter out excluded directories (unless include_images is True)
+        if not include_images:
+            original_dirs = dirs.copy()
+            dirs[:] = [d for d in dirs if d.lower() not in EXCLUDED_DIRS_SET]
+            
+            # Track skipped directories
+            skipped = [d for d in original_dirs if d.lower() in EXCLUDED_DIRS_SET]
+            if skipped and verbose:
+                for skipped_dir in skipped:
+                    results['skipped_dirs'].append(root_path / skipped_dir)
+                    print(f"  Skipping directory: {root_path / skipped_dir}")
         
         for filename in files:
             # Check file limit
@@ -480,7 +483,7 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: b
 def organize_files(results: Dict, target_dir: Path, dry_run: bool = False, 
                    copy_mode: bool = False, calculate_hashes: bool = False,
                    hash_algorithm: str = 'md5', use_multithreading: bool = False,
-                   max_workers: int = 4, verbose: bool = False):
+                   max_workers: int = 4, verbose: bool = False, delete_duplicates: bool = False):
     """
     Organize the scanned files into the target directory structure.
     
@@ -494,6 +497,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         use_multithreading: If True, calculate hashes in parallel after moving
         max_workers: Number of threads for parallel hashing
         verbose: Enable verbose output
+        delete_duplicates: If True, delete duplicate files instead of skipping them
     """
     action = "Would copy" if dry_run and copy_mode else "Would move" if dry_run else "Copying" if copy_mode else "Moving"
     
@@ -501,7 +505,10 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
     files_to_hash = []
     
     # Track seen hashes for duplicate detection
-    seen_hashes = {}  # hash -> (platform, filename)
+    seen_hashes = {}  # hash -> (platform, filename, filepath)
+    
+    # Track files to delete
+    files_to_delete = []
     
     # Organize ROMs
     print(f"\n{action} ROMs:")
@@ -538,11 +545,16 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     
                     # Check for duplicate hash
                     if file_hash in seen_hashes:
-                        dup_platform, dup_file = seen_hashes[file_hash]
-                        print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                        if delete_duplicates:
+                            print(f"    🗑️  Deleting duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                            if not dry_run:
+                                dest_path.unlink()  # Delete the file we just moved
+                        else:
+                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
                     else:
                         print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                        seen_hashes[file_hash] = (platform, filepath.name)
+                        seen_hashes[file_hash] = (platform, filepath.name, dest_path)
                 else:
                     print(f"    Moved: {filepath.name} [Platform: {platform.upper()}]")
             else:
@@ -553,11 +565,14 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     
                     # Check for duplicate hash
                     if file_hash in seen_hashes:
-                        dup_platform, dup_file = seen_hashes[file_hash]
-                        print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                        if delete_duplicates:
+                            print(f"    Would delete duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        else:
+                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
                     else:
                         print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                        seen_hashes[file_hash] = (platform, filepath.name)
+                        seen_hashes[file_hash] = (platform, filepath.name, None)
                 else:
                     print(f"    {action}: {filepath.name} [Platform: {platform.upper()}]")
     
@@ -595,11 +610,16 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         
                         # Check for duplicate hash
                         if file_hash in seen_hashes:
-                            dup_platform, dup_file = seen_hashes[file_hash]
-                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                            dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                            if delete_duplicates:
+                                print(f"    🗑️  Deleting duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                                if not dry_run:
+                                    dest_path.unlink()
+                            else:
+                                print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
                         else:
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                            seen_hashes[file_hash] = (platform, filepath.name)
+                            seen_hashes[file_hash] = (platform, filepath.name, dest_path)
                     else:
                         print(f"    Moved: {filepath.name} [Platform: {platform.upper()}]")
                 else:
@@ -610,11 +630,14 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         
                         # Check for duplicate hash
                         if file_hash in seen_hashes:
-                            dup_platform, dup_file = seen_hashes[file_hash]
-                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                            dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                            if delete_duplicates:
+                                print(f"    Would delete duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                            else:
+                                print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
                         else:
                             print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                            seen_hashes[file_hash] = (platform, filepath.name)
+                            seen_hashes[file_hash] = (platform, filepath.name, None)
                     else:
                         print(f"    {action}: {filepath.name} [Platform: {platform.upper()}]")
     
@@ -627,17 +650,27 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         
         # Display results with platform info and duplicate detection
         print(f"\n{hash_algorithm.upper()} Hashes:")
+        files_deleted = 0
         for dest_path, platform in files_to_hash:
             if dest_path in hash_results:
                 file_hash = hash_results[dest_path]
                 
                 # Check for duplicates
                 if file_hash in seen_hashes:
-                    dup_platform, dup_file = seen_hashes[file_hash]
-                    print(f"  ⚠️  Duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_algorithm.upper()}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                    dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                    if delete_duplicates:
+                        print(f"  🗑️  Deleting duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_algorithm.upper()}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        if dest_path.exists():
+                            dest_path.unlink()
+                            files_deleted += 1
+                    else:
+                        print(f"  ⚠️  Duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_algorithm.upper()}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
                 else:
                     print(f"  {dest_path.name} [Platform: {platform.upper()}]: {file_hash}")
-                    seen_hashes[file_hash] = (platform, dest_path.name)
+                    seen_hashes[file_hash] = (platform, dest_path.name, dest_path)
+        
+        if delete_duplicates and files_deleted > 0:
+            print(f"\n🗑️  Deleted {files_deleted} duplicate file(s)")
     
     # Report unknown files
     if results['unknown']:
@@ -676,6 +709,12 @@ Examples:
   
   # Use multithreaded hashing after moving files (faster for large collections)
   python rom_organizer.py /path/to/roms /path/to/organized --hash --multithreaded --threads 8
+  
+  # Include image directories (move imgs, artwork, etc.)
+  python rom_organizer.py /path/to/roms /path/to/organized --include-images
+  
+  # Delete duplicate files instead of skipping them
+  python rom_organizer.py /path/to/roms /path/to/organized --hash --delete-duplicates
         """
     )
     
@@ -698,10 +737,19 @@ Examples:
                        help='Use multithreaded hashing after moving files (faster for large collections)')
     parser.add_argument('--threads', type=int, default=4,
                        help='Number of threads for multithreaded hashing (default: 4)')
+    parser.add_argument('--include-images', action='store_true',
+                       help='Include image/media directories (imgs, artwork, screenshots, etc.) instead of excluding them')
+    parser.add_argument('--delete-duplicates', action='store_true',
+                       help='Delete duplicate files instead of skipping them (requires --hash)')
     
     args = parser.parse_args()
     
     verbose = args.verbose
+    
+    # Validate delete-duplicates requires hash
+    if args.delete_duplicates and not args.hash:
+        print("Error: --delete-duplicates requires --hash to be enabled", file=sys.stderr)
+        sys.exit(1)
     
     source_dir = Path(args.source).resolve()
     target_dir = Path(args.target).resolve()
@@ -727,8 +775,13 @@ Examples:
             print(f"Processing limit: {args.limit} files")
         if args.multithreaded and args.hash:
             print(f"Multithreaded hashing enabled ({args.threads} threads)")
+        if args.include_images:
+            print(f"Including image/media directories")
+        if args.delete_duplicates:
+            print(f"Delete duplicates mode enabled")
     
-    results = scan_directory(source_dir, max_files=args.limit, verbose=verbose)
+    results = scan_directory(source_dir, max_files=args.limit, verbose=verbose,
+                            include_images=args.include_images)
     
     # Summary
     total_roms = sum(len(files) for files in results['roms'].values())
@@ -761,7 +814,8 @@ Examples:
                   hash_algorithm=args.hash_algorithm,
                   use_multithreading=args.multithreaded,
                   max_workers=args.threads,
-                  verbose=verbose)
+                  verbose=verbose,
+                  delete_duplicates=args.delete_duplicates)
     
     if args.dry_run:
         print("\n*** DRY RUN COMPLETE - Run without --dry-run to actually organize files ***")
