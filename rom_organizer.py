@@ -12,9 +12,8 @@ import sys
 import shutil
 import hashlib
 import argparse
-import json
 from pathlib import Path
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Optional
 
 
 # Common ROM file extensions by platform
@@ -55,10 +54,17 @@ BIOS_KEYWORDS = [
     'scph', 'ps-', 'playstation',
 ]
 
+# Pre-computed set of all ROM extensions for efficient lookup
+ALL_ROM_EXTENSIONS = set(ext for exts in ROM_EXTENSIONS.values() for ext in exts)
+
 
 def calculate_hash(filepath: Path, algorithm: str = 'md5') -> str:
     """Calculate hash of a file."""
-    hash_func = hashlib.new(algorithm)
+    try:
+        hash_func = hashlib.new(algorithm)
+    except ValueError:
+        print(f"Warning: Unsupported hash algorithm '{algorithm}', using MD5", file=sys.stderr)
+        hash_func = hashlib.md5()
     
     with open(filepath, 'rb') as f:
         for chunk in iter(lambda: f.read(8192), b''):
@@ -140,7 +146,7 @@ def scan_directory(source_dir: Path) -> Dict[str, List[Path]]:
                     results['roms'][platform].append(filepath)
             else:
                 # Unknown platform
-                if extension.lower() in [ext for exts in ROM_EXTENSIONS.values() for ext in exts]:
+                if extension.lower() in ALL_ROM_EXTENSIONS:
                     results['unknown'].append(filepath)
     
     return results
