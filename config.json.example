@@ -38,8 +38,9 @@
     },
     "genesis": {
       "name": "Sega Genesis / Mega Drive",
-      "extensions": [".md", ".smd", ".gen", ".bin"],
-      "aliases": ["megadrive", "md", "sega"]
+      "extensions": [".smd", ".gen", ".bin"],
+      "aliases": ["megadrive", "md", "sega"],
+      "comment": ".md extension removed to avoid conflict with Markdown files"
     },
     "mastersystem": {
       "name": "Sega Master System",

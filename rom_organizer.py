@@ -25,7 +25,7 @@ ROM_EXTENSIONS = {
     'gbc': ['.gbc', '.cgb', '.sgb'],
     'gb': ['.gb', '.sgb'],
     'nds': ['.nds', '.ids'],
-    'genesis': ['.md', '.smd', '.gen', '.bin'],
+    'genesis': ['.smd', '.gen', '.bin'],  # .md removed to avoid conflict with Markdown files
     'mastersystem': ['.sms'],
     'gamegear': ['.gg'],
     'psx': ['.bin', '.cue', '.img', '.mdf', '.pbp', '.toc', '.cbn', '.m3u', '.chd'],
