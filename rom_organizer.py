@@ -878,6 +878,18 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
             if not dry_run:
                 if is_duplicate_name:
                     print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
+                    # Still calculate and save hash for existing files
+                    if calculate_hashes:
+                        if use_ra_hash:
+                            file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
+                            hash_label = "RA-Hash"
+                        else:
+                            file_hash = calculate_hash(dest_path, hash_algorithm)
+                            hash_label = hash_algorithm.upper()
+                        
+                        if file_hash:
+                            # Save hash information to file for already existing files
+                            save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
                     continue
                 
                 # Pre-check with RAHasher if needed (before moving)
@@ -977,6 +989,18 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 if not dry_run:
                     if is_duplicate_name:
                         print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
+                        # Still calculate and save hash for existing files
+                        if calculate_hashes:
+                            if use_ra_hash:
+                                file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
+                                hash_label = "RA-Hash"
+                            else:
+                                file_hash = calculate_hash(dest_path, hash_algorithm)
+                                hash_label = hash_algorithm.upper()
+                            
+                            if file_hash:
+                                # Save hash information to file for already existing files
+                                save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
                         continue
                     
                     # Pre-check with RAHasher if needed (before moving)
