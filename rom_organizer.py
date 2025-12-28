@@ -599,7 +599,7 @@ def save_hash_to_file(dest_dir: Path, platform: str, filename: str, file_hash: s
     
     # Prepare hash entry with all available information
     file_size = file_path.stat().st_size if file_path.exists() else 0
-    entry = f"{file_hash}\t{hash_type}\t{filename}\t{file_size}\t{category}\n"
+    entry = f"{file_hash} {hash_type} \"{filename}\" {file_size} {platform}_{category}\n"
     
     # Append to hash file (create if doesn't exist)
     with open(hash_file, 'a', encoding='utf-8') as f:
@@ -919,7 +919,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                             seen_hashes[file_hash] = (platform, filepath.name, dest_path)
                             # Save hash information to file
-                            save_hash_to_file(dest_root, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
+                            save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
                     else:
                         print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                 else:
@@ -1015,7 +1015,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                                 print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                                 seen_hashes[file_hash] = (platform, filepath.name, dest_path)
                                 # Save hash information to file
-                                save_hash_to_file(dest_root, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
+                                save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
                         else:
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                     else:
@@ -1087,7 +1087,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     # Save hash information to file
                     # Determine if BIOS based on path
                     is_bios_file_path = 'bios' in str(dest_path)
-                    save_hash_to_file(dest_root, platform, dest_path.name, file_hash, hash_label, dest_path, is_bios=is_bios_file_path)
+                    save_hash_to_file(target_dir, platform, dest_path.name, file_hash, hash_label, dest_path, is_bios=is_bios_file_path)
         
         if delete_duplicates and files_deleted > 0:
             print(f"\n🗑️  Deleted {files_deleted} duplicate file(s)")
