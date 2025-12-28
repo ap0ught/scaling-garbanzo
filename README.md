@@ -119,10 +119,15 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --copy
 python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --multithreaded --threads 8
 
 # Dry run to test without moving files
-python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --dry-run
+python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --dry-run --verbose
 ```
 
-**Note**: The `--ra-hash` flag requires [RAHasher](https://github.com/RetroAchievements/RALibretro) to be installed and available in your PATH. See `RETROACHIEVEMENTS_HASHING.md` for installation instructions.
+**Important Notes**:
+- The `--ra-hash` flag requires [RAHasher](https://github.com/RetroAchievements/RALibretro) to be installed and available in your PATH
+- RAHasher only works with **game ROM files**, not BIOS files (BIOS files will show hash calculation failures)
+- Use `--verbose` flag to see detailed error messages from RAHasher for debugging
+- Archives (.zip) containing non-ROM files (like .png images) will be skipped
+- See `RETROACHIEVEMENTS_HASHING.md` for installation instructions and troubleshooting
 
 ### Command-Line Options
 

@@ -336,7 +336,11 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
     """
     try:
         # Check if RAHasher is available
-        result = subprocess.run(['RAHasher', str(filepath)], 
+        cmd = ['RAHasher', str(filepath)]
+        if verbose:
+            print(f"      Running: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, 
                               capture_output=True, 
                               text=True, 
                               timeout=30)
@@ -357,20 +361,28 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
                 print(f"      RAHasher output: {result.stdout.strip()}")
             return result.stdout.strip()
         else:
+            # RAHasher failed - show actual error
+            error_msg = result.stderr.strip() if result.stderr.strip() else "Unknown error (no stderr output)"
+            stdout_msg = result.stdout.strip()
+            
             if verbose:
-                print(f"      RAHasher error: {result.stderr.strip()}")
+                print(f"      RAHasher failed (exit code {result.returncode})")
+                if error_msg != "Unknown error (no stderr output)":
+                    print(f"      Error: {error_msg}")
+                if stdout_msg:
+                    print(f"      Output: {stdout_msg}")
             return None
     except FileNotFoundError:
         if verbose:
-            print(f"      RAHasher not found. Please install RAHasher from RetroAchievements.")
+            print(f"      RAHasher not found in PATH. Please install RAHasher from RetroAchievements.")
         return None
     except subprocess.TimeoutExpired:
         if verbose:
-            print(f"      RAHasher timed out for {filepath.name}")
+            print(f"      RAHasher timed out (30s) for {filepath.name}")
         return None
     except Exception as e:
         if verbose:
-            print(f"      RAHasher exception: {str(e)}")
+            print(f"      RAHasher exception: {type(e).__name__}: {str(e)}")
         return None
 
 
@@ -464,6 +476,11 @@ def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Op
                 for platform, extensions in ROM_EXTENSIONS.items():
                     if inner_ext in extensions:
                         return platform
+                # If inner file has a non-ROM extension (like .png), don't treat as ROM
+                if inner_ext.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.txt', '.pdf', '.doc']:
+                    if verbose:
+                        print(f"    Archive contains non-ROM file ({inner_ext}), skipping")
+                    return None
         # If we can't determine from contents, treat as arcade/MAME ROM
         return 'arcade'
     
@@ -700,6 +717,9 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
     # Organize BIOS files
     if results['bios']:
         print(f"\n{action} BIOS files:")
+        if use_ra_hash:
+            print("  ⚠️  Note: BIOS files are not games and may not be supported by RAHasher")
+        
         for platform, files in results['bios'].items():
             platform_dir = target_dir / 'bios' / platform
             
