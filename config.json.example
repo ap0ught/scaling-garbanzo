@@ -1,0 +1,158 @@
+{
+  "comment": "ROM Organizer Configuration - Customize platform detection and file extensions",
+  "platforms": {
+    "nes": {
+      "name": "Nintendo Entertainment System",
+      "extensions": [".nes", ".unf", ".unif"],
+      "aliases": ["famicom", "fc"]
+    },
+    "snes": {
+      "name": "Super Nintendo Entertainment System",
+      "extensions": [".smc", ".sfc", ".fig", ".swc", ".mgd"],
+      "aliases": ["superfamicom", "sfc"]
+    },
+    "n64": {
+      "name": "Nintendo 64",
+      "extensions": [".z64", ".n64", ".v64"],
+      "aliases": ["nintendo64"]
+    },
+    "gba": {
+      "name": "Game Boy Advance",
+      "extensions": [".gba", ".agb", ".bin"],
+      "aliases": ["gameboyadvance"]
+    },
+    "gbc": {
+      "name": "Game Boy Color",
+      "extensions": [".gbc", ".cgb", ".sgb"],
+      "aliases": ["gameboycolor"]
+    },
+    "gb": {
+      "name": "Game Boy",
+      "extensions": [".gb", ".sgb"],
+      "aliases": ["gameboy"]
+    },
+    "nds": {
+      "name": "Nintendo DS",
+      "extensions": [".nds", ".ids"],
+      "aliases": ["ds", "nintendods"]
+    },
+    "genesis": {
+      "name": "Sega Genesis / Mega Drive",
+      "extensions": [".smd", ".gen", ".bin"],
+      "aliases": ["megadrive", "md", "sega"],
+      "comment": ".md extension removed to avoid conflict with Markdown files"
+    },
+    "mastersystem": {
+      "name": "Sega Master System",
+      "extensions": [".sms"],
+      "aliases": ["sms", "segamastersystem"]
+    },
+    "gamegear": {
+      "name": "Sega Game Gear",
+      "extensions": [".gg"],
+      "aliases": ["gg", "segagamegear"]
+    },
+    "psx": {
+      "name": "Sony PlayStation",
+      "extensions": [".bin", ".cue", ".img", ".mdf", ".pbp", ".toc", ".cbn", ".m3u", ".chd"],
+      "aliases": ["playstation", "ps1", "psone"]
+    },
+    "ps2": {
+      "name": "Sony PlayStation 2",
+      "extensions": [".iso", ".bin", ".img", ".mdf", ".z", ".z2", ".bz2", ".dump", ".cso", ".ima", ".gz", ".chd"],
+      "aliases": ["playstation2"]
+    },
+    "psp": {
+      "name": "PlayStation Portable",
+      "extensions": [".iso", ".cso", ".pbp", ".elf", ".prx"],
+      "aliases": ["playstationportable"]
+    },
+    "dreamcast": {
+      "name": "Sega Dreamcast",
+      "extensions": [".cdi", ".gdi", ".chd"],
+      "aliases": ["dc", "segadreamcast"]
+    },
+    "saturn": {
+      "name": "Sega Saturn",
+      "extensions": [".cue", ".bin", ".mds", ".mdf", ".chd"],
+      "aliases": ["segasaturn"]
+    },
+    "atari2600": {
+      "name": "Atari 2600",
+      "extensions": [".a26", ".bin"],
+      "aliases": ["2600"]
+    },
+    "atari7800": {
+      "name": "Atari 7800",
+      "extensions": [".a78"],
+      "aliases": ["7800"]
+    },
+    "lynx": {
+      "name": "Atari Lynx",
+      "extensions": [".lnx", ".o"],
+      "aliases": ["atarilynx"]
+    },
+    "jaguar": {
+      "name": "Atari Jaguar",
+      "extensions": [".j64", ".jag"],
+      "aliases": ["atarijaguar"]
+    },
+    "segacd": {
+      "name": "Sega CD / Mega CD",
+      "extensions": [".cue", ".bin", ".chd"],
+      "aliases": ["megacd", "scd"]
+    },
+    "3do": {
+      "name": "3DO Interactive Multiplayer",
+      "extensions": [".iso", ".cue", ".chd"],
+      "aliases": []
+    },
+    "pcengine": {
+      "name": "PC Engine / TurboGrafx-16",
+      "extensions": [".pce", ".sgx"],
+      "aliases": ["turbografx16", "tg16", "pcengine"]
+    },
+    "pcenginecd": {
+      "name": "PC Engine CD / TurboGrafx-CD",
+      "extensions": [".cue", ".ccd", ".chd"],
+      "aliases": ["turbografxcd", "tgcd"]
+    },
+    "neogeo": {
+      "name": "Neo Geo",
+      "extensions": [".zip"],
+      "aliases": ["ng"]
+    },
+    "neogeocd": {
+      "name": "Neo Geo CD",
+      "extensions": [".cue", ".chd"],
+      "aliases": ["ngcd"]
+    },
+    "arcade": {
+      "name": "Arcade",
+      "extensions": [".zip"],
+      "aliases": []
+    },
+    "mame": {
+      "name": "MAME",
+      "extensions": [".zip"],
+      "aliases": []
+    },
+    "fba": {
+      "name": "FinalBurn Alpha",
+      "extensions": [".zip"],
+      "aliases": ["finalburn"]
+    }
+  },
+  "bios_keywords": [
+    "bios",
+    "boot",
+    "firmware",
+    "syscard",
+    "system",
+    "scph",
+    "ps-",
+    "playstation"
+  ],
+  "hash_algorithms": ["md5", "sha1", "sha256"],
+  "default_hash": "md5"
+}
