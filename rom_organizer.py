@@ -13,12 +13,10 @@ import shutil
 import hashlib
 import argparse
 import zipfile
-import threading
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from queue import Queue
 
 
 # Common archive formats accepted at ingestion time
@@ -26,6 +24,15 @@ ARCHIVE_EXTENSIONS = ['.zip', '.7z', '.rar']
 
 # Playlist / descriptor formats for disc sets
 PLAYLIST_EXTENSIONS = ['.m3u']
+
+# Non-ROM file extensions to filter out (config, metadata, saves, media, documents)
+NON_ROM_EXTENSIONS = {
+    '.cfg', '.ini', '.dat', '.xml', '.txt', '.nfo', '.diz',  # Config files
+    '.json', '.yaml', '.yml',  # Metadata files
+    '.sav', '.srm', '.state', '.sta',  # Save files
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tif', '.tiff',  # Images
+    '.pdf', '.doc', '.docx', '.rtf'  # Documents
+}
 
 # Common ROM file extensions by platform
 ROM_EXTENSIONS = {
@@ -211,10 +218,7 @@ RAHASHER_SYSTEM_MAP = {
     'arduboy': 'Arduboy',
     'wasm4': 'WASM4',
     '3do': '3DO',
-    'arcade': 'Arcade',
-    'mame': 'Arcade',
-    'fba': 'Arcade',
-    'neogeo': 'Arcade',
+    # Note: Arcade platforms removed - they use special filename-based hashing
     'neogeocd': 'NGCD',
 }
 
@@ -292,8 +296,8 @@ def detect_platform_from_header(filepath: Path) -> Optional[str]:
     """
     for platform, signatures in ROM_HEADERS.items():
         for offset, signature in signatures:
-            # Read a reasonable amount of data to check for signature
-            # Use max 512 bytes to handle various header locations
+            # Seek to the platform-specific offset, then read a reasonable amount of data
+            # Read at least 512 bytes (or the full signature length if larger) from that offset
             read_length = max(len(signature), 512) if signature else 512
             header_data = read_file_header(filepath, offset, read_length)
             
@@ -430,6 +434,12 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
         RA hash string or None if RAHasher is not available or fails
     """
     try:
+        # Check if platform is arcade - these use special filename-based hashing
+        if platform.lower() in ['arcade', 'mame', 'fba', 'neogeo']:
+            if verbose:
+                print(f"      Note: Arcade ROMs use special filename-based hashing in RetroAchievements")
+            return None
+        
         # Get RAHasher system key for this platform
         canonical_platform = canonical_system(platform.lower())
         rahasher_system = RAHASHER_SYSTEM_MAP.get(canonical_platform)
@@ -451,14 +461,27 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
         
         if result.returncode == 0:
             # Parse RAHasher output to extract hash
-            # Typical output: "Supported Game Files: <hash>"
-            for line in result.stdout.splitlines():
-                if 'Supported Game Files' in line or ':' in line:
+            # First, prefer the explicit "Supported Game Files" line
+            lines = result.stdout.splitlines()
+            for line in lines:
+                if 'Supported Game Files' in line:
                     parts = line.split(':')
                     if len(parts) >= 2:
                         hash_value = parts[-1].strip()
-                        if hash_value and len(hash_value) == 32:  # MD5 hash length
+                        if (hash_value and len(hash_value) == 32 and 
+                            all(c in '0123456789abcdefABCDEF' for c in hash_value)):
                             return hash_value
+            
+            # Fallback: consider other colon-containing lines with hex validation
+            for line in lines:
+                if ':' not in line:
+                    continue
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    hash_value = parts[-1].strip()
+                    if (hash_value and len(hash_value) == 32 and
+                        all(c in '0123456789abcdefABCDEF' for c in hash_value)):
+                        return hash_value
             
             # If we can't parse, return the full output for debugging
             if verbose:
@@ -666,12 +689,18 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: b
                 return results
             
             filepath = root_path / filename
-            extension = filepath.suffix
+            extension = filepath.suffix.lower()
             
-            # Skip non-ROM files
+            # Skip non-ROM files (no extension)
             if not extension:
                 if verbose:
                     print(f"  Skipping (no extension): {filename}")
+                continue
+            
+            # Skip non-ROM file extensions (config, metadata, saves, etc.)
+            if extension in NON_ROM_EXTENSIONS:
+                if verbose:
+                    print(f"  Skipping non-ROM file: {filename} ({extension} extension)")
                 continue
             
             if verbose:
@@ -734,9 +763,6 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
     
     # Track seen hashes for duplicate detection
     seen_hashes = {}  # hash -> (platform, filename, filepath)
-    
-    # Track files to delete
-    files_to_delete = []
     
     # Organize ROMs
     print(f"\n{action} ROMs:")

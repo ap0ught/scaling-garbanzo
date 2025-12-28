@@ -123,9 +123,10 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --dry-r
 ```
 
 **Important Notes**:
-- The `--ra-hash` flag requires [RAHasher](https://github.com/RetroAchievements/RALibretro) to be installed and available in your PATH
+- The `--ra-hash` flag requires [RAHasher](https://github.com/RetroAchievements/RAHasher) to be installed and available in your PATH
 - RAHasher only works with **game ROM files**, not BIOS files (BIOS files will show hash calculation failures)
 - The tool automatically maps platform names to RAHasher system keys (e.g., `gba` → `GBA`, `psx` → `PS`, `genesis` → `MD`)
+- Arcade ROMs use special filename-based hashing in RetroAchievements and are not supported by standard RAHasher invocation
 - Platforms without RAHasher support will show "No RAHasher system mapping" in verbose mode
 - Use `--verbose` flag to see detailed error messages from RAHasher for debugging
 - Archives (.zip) containing non-ROM files (like .png images) will be skipped
