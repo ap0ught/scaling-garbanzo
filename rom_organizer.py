@@ -123,6 +123,101 @@ BIOS_KEYWORDS = [
     'scph', 'ps-', 'playstation',
 ]
 
+# Mapping from our platform names to RAHasher system keys
+# Based on RAHasher documentation
+RAHASHER_SYSTEM_MAP = {
+    'gb': 'GB',
+    'gba': 'GBA',
+    'gbc': 'GBC',
+    'nes': 'NES',
+    'snes': 'SNES',
+    'n64': 'N64',
+    'gamecube': 'GC',
+    'gc': 'GC',
+    'nds': 'DS',
+    'ds': 'DS',
+    'dsi': 'DSi',
+    'pokemonmini': 'MINI',
+    'mini': 'MINI',
+    'virtualboy': 'VB',
+    'vb': 'VB',
+    'gameandwatch': 'G&W',
+    'fds': 'FDS',
+    '3ds': '3DS',
+    'wii': 'Wii',
+    'wiiu': 'WiiU',
+    'genesis': 'MD',
+    'megadrive': 'MD',
+    'md': 'MD',
+    'mastersystem': 'SMS',
+    'sms': 'SMS',
+    'gamegear': 'GG',
+    'gg': 'GG',
+    'sega32x': '32X',
+    '32x': '32X',
+    'segacd': 'SegaCD',
+    'saturn': 'Saturn',
+    'dreamcast': 'DC',
+    'dc': 'DC',
+    'sg1000': 'SG1000',
+    'psx': 'PS',
+    'ps': 'PS',
+    'ps1': 'PS',
+    'playstation': 'PS',
+    'ps2': 'PS2',
+    'psp': 'PSP',
+    'atari2600': '2600',
+    '2600': '2600',
+    'atari5200': '5200',
+    '5200': '5200',
+    'atari7800': '7800',
+    '7800': '7800',
+    'lynx': 'Lynx',
+    'jaguar': 'Jaguar',
+    'jaguarcd': 'JaguarCD',
+    'pcengine': 'PCE',
+    'pce': 'PCE',
+    'tg16': 'PCE',
+    'turbografx16': 'PCE',
+    'pcenginecd': 'PCECD',
+    'pcecd': 'PCECD',
+    'supergrafx': 'SGX',
+    'sgx': 'SGX',
+    'pcfx': 'PCFX',
+    'neogeopocket': 'NGP',
+    'ngp': 'NGP',
+    'neogeopocketcolor': 'NGPC',
+    'ngpc': 'NGPC',
+    'wonderswan': 'WS',
+    'ws': 'WS',
+    'wonderswancolor': 'WSC',
+    'wsc': 'WSC',
+    'colecovision': 'Coleco',
+    'coleco': 'Coleco',
+    'intellivision': 'Intv',
+    'intv': 'Intv',
+    'vectrex': 'Vectrex',
+    'odyssey2': 'Odyssey2',
+    'channelf': 'ChannelF',
+    'cpc': 'CPC',
+    'apple2': 'AppleII',
+    'msx': 'MSX',
+    'pc8800': 'PC8800',
+    'pc9800': 'PC9800',
+    'zxspectrum': 'ZXSpectrum',
+    'amstradcpc': 'CPC',
+    'supervision': 'Supervision',
+    'megaduck': 'MegaDuck',
+    'arduboy': 'Arduboy',
+    'wasm4': 'WASM4',
+    '3do': '3DO',
+    'arcade': 'Arcade',
+    'mame': 'Arcade',
+    'fba': 'Arcade',
+    'neogeo': 'Arcade',
+    'neogeocd': 'NGCD',
+}
+
 
 def canonical_system(system_key: str) -> str:
     """Map aliases to a canonical system key."""
@@ -335,8 +430,17 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
         RA hash string or None if RAHasher is not available or fails
     """
     try:
-        # Check if RAHasher is available
-        cmd = ['RAHasher', str(filepath)]
+        # Get RAHasher system key for this platform
+        canonical_platform = canonical_system(platform.lower())
+        rahasher_system = RAHASHER_SYSTEM_MAP.get(canonical_platform)
+        
+        if not rahasher_system:
+            if verbose:
+                print(f"      No RAHasher system mapping for platform: {platform}")
+            return None
+        
+        # Build RAHasher command with system key
+        cmd = ['RAHasher', rahasher_system, str(filepath)]
         if verbose:
             print(f"      Running: {' '.join(cmd)}")
         
