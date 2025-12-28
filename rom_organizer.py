@@ -852,6 +852,14 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
                     continue
                 
+                # Pre-check with RAHasher if needed (before moving)
+                if calculate_hashes and use_ra_hash and not use_multithreading:
+                    file_hash, error_type = calculate_ra_hash(filepath, platform, verbose)
+                    if not file_hash:
+                        # Skip this file - RAHasher can't process it
+                        print(f"    Skipping: {filepath.name} [Platform: {platform.upper()}] - RAHasher cannot process this file")
+                        continue
+                
                 if copy_mode:
                     shutil.copy2(filepath, dest_path)
                 else:
@@ -863,7 +871,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 elif calculate_hashes:
                     # Calculate hash immediately if not multithreading
                     if use_ra_hash:
-                        file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
+                        # We already calculated it above before move
                         hash_label = "RA-Hash"
                     else:
                         file_hash = calculate_hash(dest_path, hash_algorithm)
@@ -892,6 +900,10 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     if use_ra_hash:
                         file_hash, error_type = calculate_ra_hash(filepath, platform, verbose)
                         hash_label = "RA-Hash"
+                        if not file_hash:
+                            # Skip this file in dry-run too
+                            print(f"    Skipping: {filepath.name} [Platform: {platform.upper()}] - RAHasher cannot process this file")
+                            continue
                     else:
                         file_hash = calculate_hash(filepath, hash_algorithm)
                         hash_label = hash_algorithm.upper()
@@ -935,6 +947,14 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
                         continue
                     
+                    # Pre-check with RAHasher if needed (before moving)
+                    if calculate_hashes and use_ra_hash and not use_multithreading:
+                        file_hash, error_type = calculate_ra_hash(filepath, platform, verbose)
+                        if not file_hash:
+                            # Skip this file - RAHasher can't process it
+                            print(f"    Skipping: {filepath.name} [Platform: {platform.upper()}] - RAHasher cannot process this file")
+                            continue
+                    
                     if copy_mode:
                         shutil.copy2(filepath, dest_path)
                     else:
@@ -945,7 +965,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         files_to_hash.append((dest_path, platform))
                     elif calculate_hashes:
                         if use_ra_hash:
-                            file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
+                            # We already calculated it above before move
                             hash_label = "RA-Hash"
                         else:
                             file_hash = calculate_hash(dest_path, hash_algorithm)
@@ -974,6 +994,10 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         if use_ra_hash:
                             file_hash, error_type = calculate_ra_hash(filepath, platform, verbose)
                             hash_label = "RA-Hash"
+                            if not file_hash:
+                                # Skip this file in dry-run too
+                                print(f"    Skipping: {filepath.name} [Platform: {platform.upper()}] - RAHasher cannot process this file")
+                                continue
                         else:
                             file_hash = calculate_hash(filepath, hash_algorithm)
                             hash_label = hash_algorithm.upper()
