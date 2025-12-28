@@ -11,7 +11,8 @@ A Python tool to organize your game ROM collection into a clean, platform-based 
 - 📃 **Playlist Support**: Recognizes .m3u playlist files for multi-disc games
 - 🔤 **System Aliases**: Accepts multiple naming conventions (ps1→psx, tg16→pcengine, megadrive→genesis)
 - 🎯 **Format Preferences**: Smart ordering prefers CHD over ISO/BIN, native ROM formats over generic bins
-- 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with RetroAchievements and Redump
+- 🔐 **Hash Calculation**: Calculate MD5/SHA-1/SHA-256 hashes for ROM verification with Redump and ROM Vault
+- 🎯 **RetroAchievements Integration**: Use RAHasher for achievement-compatible hashing with `--ra-hash`
 - 🔄 **Duplicate Detection**: Identifies duplicate ROMs by hash across platforms
 - 🗑️ **Delete Duplicates**: Automatically delete duplicate files with `--delete-duplicates`
 - ⚡ **Multithreaded Hashing**: Calculate hashes in parallel after moving files for faster processing
@@ -84,7 +85,10 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --copy
 # Calculate MD5 hashes for verification
 python rom_organizer.py /path/to/messy/roms /path/to/organized --hash
 
-# Calculate SHA-1 hashes (for RetroAchievements)
+# Use RetroAchievements-compatible hashing (requires RAHasher installed)
+python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --copy
+
+# Calculate SHA-1 hashes for general verification
 python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --hash-algorithm sha1
 
 # Verbose mode to see detailed progress
@@ -103,6 +107,23 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --include-images
 python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --delete-duplicates
 ```
 
+### RetroAchievements Integration
+
+For RetroAchievements achievement tracking, use the `--ra-hash` flag to call the external RAHasher tool:
+
+```bash
+# Organize with RetroAchievements-compatible hashing
+python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --copy
+
+# With multithreading for faster processing
+python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --multithreaded --threads 8
+
+# Dry run to test without moving files
+python rom_organizer.py /path/to/messy/roms /path/to/organized --ra-hash --dry-run
+```
+
+**Note**: The `--ra-hash` flag requires [RAHasher](https://github.com/RetroAchievements/RALibretro) to be installed and available in your PATH. See `RETROACHIEVEMENTS_HASHING.md` for installation instructions.
+
 ### Command-Line Options
 
 | Option | Description |
@@ -111,14 +132,15 @@ python rom_organizer.py /path/to/messy/roms /path/to/organized --hash --delete-d
 | `target` | Target directory for organized ROMs (required) |
 | `--dry-run` | Show what would be done without actually moving files |
 | `--copy` | Copy files instead of moving them |
-| `--hash` | Calculate and display hashes for ROM verification |
-| `--hash-algorithm` | Hash algorithm: `md5`, `sha1`, or `sha256` (default: `md5`) |
+| `--hash` | Calculate and display hashes for ROM verification (MD5/SHA-1/SHA-256) |
+| `--ra-hash` | Use RetroAchievements-compatible hashing via RAHasher (requires RAHasher installed) |
+| `--hash-algorithm` | Hash algorithm for `--hash`: `md5`, `sha1`, or `sha256` (default: `md5`) |
 | `-v`, `--verbose` | Enable verbose output showing detailed scanning progress |
 | `--limit` | Limit the number of files to process (useful for testing) |
 | `--multithreaded` | Use multithreaded hashing after moving files (faster) |
 | `--threads` | Number of threads for multithreaded hashing (default: 4) |
 | `--include-images` | Include image/media directories instead of excluding them |
-| `--delete-duplicates` | Delete duplicate files instead of skipping them (requires `--hash`) |
+| `--delete-duplicates` | Delete duplicate files instead of skipping them (requires `--hash` or `--ra-hash`) |
 
 ### Examples
 

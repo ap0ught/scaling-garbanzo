@@ -14,6 +14,7 @@ import hashlib
 import argparse
 import zipfile
 import threading
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -321,6 +322,110 @@ def calculate_hashes_multithreaded(files: List[Path], algorithm: str = 'md5',
     return results
 
 
+def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> Optional[str]:
+    """
+    Calculate RetroAchievements-compatible hash using external RAHasher tool.
+    
+    Args:
+        filepath: Path to the ROM file
+        platform: Detected platform name
+        verbose: Enable verbose output
+    
+    Returns:
+        RA hash string or None if RAHasher is not available or fails
+    """
+    try:
+        # Check if RAHasher is available
+        result = subprocess.run(['RAHasher', str(filepath)], 
+                              capture_output=True, 
+                              text=True, 
+                              timeout=30)
+        
+        if result.returncode == 0:
+            # Parse RAHasher output to extract hash
+            # Typical output: "Supported Game Files: <hash>"
+            for line in result.stdout.splitlines():
+                if 'Supported Game Files' in line or ':' in line:
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        hash_value = parts[-1].strip()
+                        if hash_value and len(hash_value) == 32:  # MD5 hash length
+                            return hash_value
+            
+            # If we can't parse, return the full output for debugging
+            if verbose:
+                print(f"      RAHasher output: {result.stdout.strip()}")
+            return result.stdout.strip()
+        else:
+            if verbose:
+                print(f"      RAHasher error: {result.stderr.strip()}")
+            return None
+    except FileNotFoundError:
+        if verbose:
+            print(f"      RAHasher not found. Please install RAHasher from RetroAchievements.")
+        return None
+    except subprocess.TimeoutExpired:
+        if verbose:
+            print(f"      RAHasher timed out for {filepath.name}")
+        return None
+    except Exception as e:
+        if verbose:
+            print(f"      RAHasher exception: {str(e)}")
+        return None
+
+
+def calculate_ra_hashes_multithreaded(files: List[Tuple[Path, str]], 
+                                      max_workers: int = 4, 
+                                      verbose: bool = False) -> Dict[Path, str]:
+    """
+    Calculate RA hashes for multiple files using thread pool.
+    
+    Args:
+        files: List of (filepath, platform) tuples
+        max_workers: Number of concurrent threads
+        verbose: Show progress
+    
+    Returns:
+        Dictionary mapping file paths to their RA hashes
+    """
+    results = {}
+    total = len(files)
+    
+    if verbose:
+        print(f"\n  Calculating RetroAchievements hashes using {max_workers} threads...")
+        print(f"    Note: This requires RAHasher to be installed and in PATH")
+    
+    def ra_hash_worker(filepath: Path, platform: str) -> Tuple[Path, Optional[str]]:
+        """Worker function for RA hash calculation."""
+        hash_value = calculate_ra_hash(filepath, platform, verbose=False)
+        return (filepath, hash_value)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all RA hash calculation jobs
+        future_to_file = {
+            executor.submit(ra_hash_worker, filepath, platform): filepath 
+            for filepath, platform in files
+        }
+        
+        # Process completed hashes
+        completed = 0
+        for future in as_completed(future_to_file):
+            filepath, hash_value = future.result()
+            completed += 1
+            
+            if hash_value:
+                results[filepath] = hash_value
+                if verbose and completed % 10 == 0:
+                    print(f"    Progress: {completed}/{total} files hashed")
+            elif verbose:
+                print(f"    Failed to hash: {filepath.name}")
+    
+    if verbose:
+        print(f"    Completed: {len(results)}/{total} files hashed successfully")
+    
+    return results
+
+
 def is_bios_file(filename: str) -> bool:
     """Check if a file is likely a BIOS file based on its name."""
     filename_lower = filename.lower()
@@ -483,7 +588,8 @@ def scan_directory(source_dir: Path, max_files: Optional[int] = None, verbose: b
 def organize_files(results: Dict, target_dir: Path, dry_run: bool = False, 
                    copy_mode: bool = False, calculate_hashes: bool = False,
                    hash_algorithm: str = 'md5', use_multithreading: bool = False,
-                   max_workers: int = 4, verbose: bool = False, delete_duplicates: bool = False):
+                   max_workers: int = 4, verbose: bool = False, delete_duplicates: bool = False,
+                   use_ra_hash: bool = False):
     """
     Organize the scanned files into the target directory structure.
     
@@ -498,6 +604,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         max_workers: Number of threads for parallel hashing
         verbose: Enable verbose output
         delete_duplicates: If True, delete duplicate files instead of skipping them
+        use_ra_hash: If True, use RAHasher for RetroAchievements-compatible hashing
     """
     action = "Would copy" if dry_run and copy_mode else "Would move" if dry_run else "Copying" if copy_mode else "Moving"
     
@@ -540,39 +647,53 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     files_to_hash.append((dest_path, platform))
                 elif calculate_hashes:
                     # Calculate hash immediately if not multithreading
-                    file_hash = calculate_hash(dest_path, hash_algorithm)
-                    hash_label = hash_algorithm.upper()
-                    
-                    # Check for duplicate hash
-                    if file_hash in seen_hashes:
-                        dup_platform, dup_file, dup_path = seen_hashes[file_hash]
-                        if delete_duplicates:
-                            print(f"    🗑️  Deleting duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
-                            if not dry_run:
-                                dest_path.unlink()  # Delete the file we just moved
-                        else:
-                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                    if use_ra_hash:
+                        file_hash = calculate_ra_hash(dest_path, platform, verbose)
+                        hash_label = "RA-Hash"
                     else:
-                        print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                        seen_hashes[file_hash] = (platform, filepath.name, dest_path)
+                        file_hash = calculate_hash(dest_path, hash_algorithm)
+                        hash_label = hash_algorithm.upper()
+                    
+                    if file_hash:
+                        # Check for duplicate hash
+                        if file_hash in seen_hashes:
+                            dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                            if delete_duplicates:
+                                print(f"    🗑️  Deleting duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                                if not dry_run:
+                                    dest_path.unlink()  # Delete the file we just moved
+                            else:
+                                print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                        else:
+                            print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                            seen_hashes[file_hash] = (platform, filepath.name, dest_path)
+                    else:
+                        print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                 else:
                     print(f"    Moved: {filepath.name} [Platform: {platform.upper()}]")
             else:
                 # Dry run mode
                 if calculate_hashes and not use_multithreading:
-                    file_hash = calculate_hash(filepath, hash_algorithm)
-                    hash_label = hash_algorithm.upper()
-                    
-                    # Check for duplicate hash
-                    if file_hash in seen_hashes:
-                        dup_platform, dup_file, dup_path = seen_hashes[file_hash]
-                        if delete_duplicates:
-                            print(f"    Would delete duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
-                        else:
-                            print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                    if use_ra_hash:
+                        file_hash = calculate_ra_hash(filepath, platform, verbose)
+                        hash_label = "RA-Hash"
                     else:
-                        print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                        seen_hashes[file_hash] = (platform, filepath.name, None)
+                        file_hash = calculate_hash(filepath, hash_algorithm)
+                        hash_label = hash_algorithm.upper()
+                    
+                    if file_hash:
+                        # Check for duplicate hash
+                        if file_hash in seen_hashes:
+                            dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                            if delete_duplicates:
+                                print(f"    Would delete duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                            else:
+                                print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                        else:
+                            print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                            seen_hashes[file_hash] = (platform, filepath.name, None)
+                    else:
+                        print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                 else:
                     print(f"    {action}: {filepath.name} [Platform: {platform.upper()}]")
     
@@ -605,51 +726,72 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     if calculate_hashes and use_multithreading:
                         files_to_hash.append((dest_path, platform))
                     elif calculate_hashes:
-                        file_hash = calculate_hash(dest_path, hash_algorithm)
-                        hash_label = hash_algorithm.upper()
-                        
-                        # Check for duplicate hash
-                        if file_hash in seen_hashes:
-                            dup_platform, dup_file, dup_path = seen_hashes[file_hash]
-                            if delete_duplicates:
-                                print(f"    🗑️  Deleting duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
-                                if not dry_run:
-                                    dest_path.unlink()
-                            else:
-                                print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        if use_ra_hash:
+                            file_hash = calculate_ra_hash(dest_path, platform, verbose)
+                            hash_label = "RA-Hash"
                         else:
-                            print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                            seen_hashes[file_hash] = (platform, filepath.name, dest_path)
+                            file_hash = calculate_hash(dest_path, hash_algorithm)
+                            hash_label = hash_algorithm.upper()
+                        
+                        if file_hash:
+                            # Check for duplicate hash
+                            if file_hash in seen_hashes:
+                                dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                                if delete_duplicates:
+                                    print(f"    🗑️  Deleting duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                                    if not dry_run:
+                                        dest_path.unlink()
+                                else:
+                                    print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                            else:
+                                print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                                seen_hashes[file_hash] = (platform, filepath.name, dest_path)
+                        else:
+                            print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                     else:
                         print(f"    Moved: {filepath.name} [Platform: {platform.upper()}]")
                 else:
                     # Dry run mode
                     if calculate_hashes and not use_multithreading:
-                        file_hash = calculate_hash(filepath, hash_algorithm)
-                        hash_label = hash_algorithm.upper()
-                        
-                        # Check for duplicate hash
-                        if file_hash in seen_hashes:
-                            dup_platform, dup_file, dup_path = seen_hashes[file_hash]
-                            if delete_duplicates:
-                                print(f"    Would delete duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
-                            else:
-                                print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        if use_ra_hash:
+                            file_hash = calculate_ra_hash(filepath, platform, verbose)
+                            hash_label = "RA-Hash"
                         else:
-                            print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
-                            seen_hashes[file_hash] = (platform, filepath.name, None)
+                            file_hash = calculate_hash(filepath, hash_algorithm)
+                            hash_label = hash_algorithm.upper()
+                        
+                        if file_hash:
+                            # Check for duplicate hash
+                            if file_hash in seen_hashes:
+                                dup_platform, dup_file, dup_path = seen_hashes[file_hash]
+                                if delete_duplicates:
+                                    print(f"    Would delete duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                                else:
+                                    print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                            else:
+                                print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
+                                seen_hashes[file_hash] = (platform, filepath.name, None)
+                        else:
+                            print(f"    {action}: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                     else:
                         print(f"    {action}: {filepath.name} [Platform: {platform.upper()}]")
     
     # Calculate hashes in parallel if multithreading enabled
     if files_to_hash and use_multithreading and not dry_run:
         print(f"\nCalculating hashes for {len(files_to_hash)} files using {max_workers} threads...")
-        # Extract just the paths for hashing
-        paths_only = [path for path, _ in files_to_hash]
-        hash_results = calculate_hashes_multithreaded(paths_only, hash_algorithm, max_workers, verbose)
+        
+        if use_ra_hash:
+            # Use RA hashing
+            hash_results = calculate_ra_hashes_multithreaded(files_to_hash, max_workers, verbose)
+            hash_label = "RA-Hash"
+        else:
+            # Use standard hashing
+            paths_only = [path for path, _ in files_to_hash]
+            hash_results = calculate_hashes_multithreaded(paths_only, hash_algorithm, max_workers, verbose)
+            hash_label = hash_algorithm.upper()
         
         # Display results with platform info and duplicate detection
-        print(f"\n{hash_algorithm.upper()} Hashes:")
+        print(f"\n{hash_label} Results:")
         files_deleted = 0
         for dest_path, platform in files_to_hash:
             if dest_path in hash_results:
@@ -659,12 +801,12 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 if file_hash in seen_hashes:
                     dup_platform, dup_file, dup_path = seen_hashes[file_hash]
                     if delete_duplicates:
-                        print(f"  🗑️  Deleting duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_algorithm.upper()}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        print(f"  🗑️  Deleting duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
                         if dest_path.exists():
                             dest_path.unlink()
                             files_deleted += 1
                     else:
-                        print(f"  ⚠️  Duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_algorithm.upper()}: {file_hash}) - same as {dup_file} [{dup_platform.upper()}]")
+                        print(f"  ⚠️  Duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
                 else:
                     print(f"  {dest_path.name} [Platform: {platform.upper()}]: {file_hash}")
                     seen_hashes[file_hash] = (platform, dest_path.name, dest_path)
@@ -715,6 +857,9 @@ Examples:
   
   # Delete duplicate files instead of skipping them
   python rom_organizer.py /path/to/roms /path/to/organized --hash --delete-duplicates
+  
+  # Use RetroAchievements-compatible hashing (requires RAHasher to be installed)
+  python rom_organizer.py /path/to/roms /path/to/organized --ra-hash --copy
         """
     )
     
@@ -726,9 +871,11 @@ Examples:
                        help='Copy files instead of moving them')
     parser.add_argument('--hash', action='store_true',
                        help='Calculate and display hashes for verification')
+    parser.add_argument('--ra-hash', action='store_true',
+                       help='Use RetroAchievements-compatible hashing via RAHasher (requires RAHasher installed)')
     parser.add_argument('--hash-algorithm', type=str, default='md5',
                        choices=['md5', 'sha1', 'sha256'],
-                       help='Hash algorithm to use (default: md5, use sha1 for RetroAchievements)')
+                       help='Hash algorithm to use with --hash (default: md5)')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output showing detailed scanning progress')
     parser.add_argument('--limit', type=int, default=None,
@@ -740,15 +887,20 @@ Examples:
     parser.add_argument('--include-images', action='store_true',
                        help='Include image/media directories (imgs, artwork, screenshots, etc.) instead of excluding them')
     parser.add_argument('--delete-duplicates', action='store_true',
-                       help='Delete duplicate files instead of skipping them (requires --hash)')
+                       help='Delete duplicate files instead of skipping them (requires --hash or --ra-hash)')
     
     args = parser.parse_args()
     
     verbose = args.verbose
     
-    # Validate delete-duplicates requires hash
-    if args.delete_duplicates and not args.hash:
-        print("Error: --delete-duplicates requires --hash to be enabled", file=sys.stderr)
+    # Validate delete-duplicates requires hash or ra-hash
+    if args.delete_duplicates and not args.hash and not args.ra_hash:
+        print("Error: --delete-duplicates requires --hash or --ra-hash to be enabled", file=sys.stderr)
+        sys.exit(1)
+    
+    # Validate that --hash and --ra-hash are not used together
+    if args.hash and args.ra_hash:
+        print("Error: --hash and --ra-hash cannot be used together", file=sys.stderr)
         sys.exit(1)
     
     source_dir = Path(args.source).resolve()
@@ -773,8 +925,10 @@ Examples:
         print(f"Verbose mode enabled")
         if args.limit:
             print(f"Processing limit: {args.limit} files")
-        if args.multithreaded and args.hash:
+        if args.multithreaded and (args.hash or args.ra_hash):
             print(f"Multithreaded hashing enabled ({args.threads} threads)")
+        if args.ra_hash:
+            print(f"RetroAchievements hashing enabled (requires RAHasher)")
         if args.include_images:
             print(f"Including image/media directories")
         if args.delete_duplicates:
@@ -807,15 +961,19 @@ Examples:
     if args.dry_run:
         print("\n*** DRY RUN MODE - No files will be moved ***")
     
+    # Determine hash mode
+    calculate_hashes = args.hash or args.ra_hash
+    
     organize_files(results, target_dir, 
                   dry_run=args.dry_run, 
                   copy_mode=args.copy,
-                  calculate_hashes=args.hash,
+                  calculate_hashes=calculate_hashes,
                   hash_algorithm=args.hash_algorithm,
                   use_multithreading=args.multithreaded,
                   max_workers=args.threads,
                   verbose=verbose,
-                  delete_duplicates=args.delete_duplicates)
+                  delete_duplicates=args.delete_duplicates,
+                  use_ra_hash=args.ra_hash)
     
     if args.dry_run:
         print("\n*** DRY RUN COMPLETE - Run without --dry-run to actually organize files ***")

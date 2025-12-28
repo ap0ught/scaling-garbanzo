@@ -40,14 +40,25 @@ This will:
 - Display hashes for verification with Redump
 - Copy files to organized structure
 
-### 4. Organize with SHA-1 hashes (for RetroAchievements)
+### 4. Organize with RetroAchievements-compatible hashing
+```bash
+python rom_organizer.py /path/to/your/roms /path/to/organized --ra-hash --copy
+```
+
+This will:
+- Use RAHasher for achievement-compatible hashing
+- Display RA hashes for each file
+- Copy files to organized structure
+- **Requires RAHasher to be installed** (see RETROACHIEVEMENTS_HASHING.md)
+
+### 5. Organize with standard SHA-1 hashes
 ```bash
 python rom_organizer.py /path/to/your/roms /path/to/organized --hash --hash-algorithm sha1 --copy
 ```
 
 This will:
-- Calculate SHA-1 hash for each file
-- Display hashes for verification with RetroAchievements
+- Calculate SHA-1 hash for each file (standard file hashing)
+- Display hashes for general verification
 - Copy files to organized structure
 
 ## Example Workflow
