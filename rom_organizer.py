@@ -578,6 +578,34 @@ def calculate_ra_hashes_multithreaded(files: List[Tuple[Path, str]],
     return results
 
 
+def save_hash_to_file(dest_dir: Path, platform: str, filename: str, file_hash: str, 
+                      hash_type: str, file_path: Path, is_bios: bool = False) -> None:
+    """
+    Save hash information to a platform-specific hash file.
+    
+    Args:
+        dest_dir: Destination root directory
+        platform: Platform name
+        filename: ROM filename
+        file_hash: Hash value
+        hash_type: Type of hash (e.g., 'MD5', 'SHA-1', 'RA-Hash')
+        file_path: Path to the file
+        is_bios: Whether this is a BIOS file
+    """
+    # Create hash file in the platform directory
+    category = 'bios' if is_bios else 'roms'
+    platform_dir = dest_dir / category / platform
+    hash_file = platform_dir / f"{platform}_hashes.txt"
+    
+    # Prepare hash entry with all available information
+    file_size = file_path.stat().st_size if file_path.exists() else 0
+    entry = f"{file_hash}\t{hash_type}\t{filename}\t{file_size}\t{category}\n"
+    
+    # Append to hash file (create if doesn't exist)
+    with open(hash_file, 'a', encoding='utf-8') as f:
+        f.write(entry)
+
+
 def is_bios_file(filename: str) -> bool:
     """Check if a file is likely a BIOS file based on its name."""
     filename_lower = filename.lower()
@@ -890,6 +918,8 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         else:
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                             seen_hashes[file_hash] = (platform, filepath.name, dest_path)
+                            # Save hash information to file
+                            save_hash_to_file(dest_root, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
                     else:
                         print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                 else:
@@ -984,6 +1014,8 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                             else:
                                 print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                                 seen_hashes[file_hash] = (platform, filepath.name, dest_path)
+                                # Save hash information to file
+                                save_hash_to_file(dest_root, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
                         else:
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                     else:
@@ -1052,6 +1084,10 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 else:
                     print(f"  {dest_path.name} [Platform: {platform.upper()}]: {file_hash}")
                     seen_hashes[file_hash] = (platform, dest_path.name, dest_path)
+                    # Save hash information to file
+                    # Determine if BIOS based on path
+                    is_bios_file_path = 'bios' in str(dest_path)
+                    save_hash_to_file(dest_root, platform, dest_path.name, file_hash, hash_label, dest_path, is_bios=is_bios_file_path)
         
         if delete_duplicates and files_deleted > 0:
             print(f"\n🗑️  Deleted {files_deleted} duplicate file(s)")
