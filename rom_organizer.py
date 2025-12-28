@@ -1213,23 +1213,25 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
         if verbose:
             print("\nCleaning up empty source directories...")
         
-        # Get the common parent directories
+        # Get the common parent directories (limit traversal depth for safety)
         common_roots = set()
+        MAX_DEPTH = 10  # Limit how far up we traverse to avoid system directories
         for source_dir in source_dirs:
-            # Find the highest level parent that makes sense to clean
-            # Start from the directory itself and go up
+            # Add the directory and its parents up to MAX_DEPTH levels
             current = source_dir
-            while current.parent != current:  # Not root
+            depth = 0
+            while current.parent != current and depth < MAX_DEPTH:
                 common_roots.add(current)
                 current = current.parent
+                depth += 1
         
         # Remove empty directories
         removed_count = 0
         # Sort by depth (deepest first) to remove children before parents
         for dir_path in sorted(common_roots, key=lambda p: len(p.parts), reverse=True):
             try:
-                # Check if empty
-                if dir_path.exists() and not any(dir_path.iterdir()):
+                # Check if empty (efficient check - stops at first item)
+                if dir_path.exists() and next(dir_path.iterdir(), None) is None:
                     if verbose:
                         print(f"  Removing empty directory: {dir_path}")
                     dir_path.rmdir()
