@@ -421,7 +421,7 @@ def calculate_hashes_multithreaded(files: List[Path], algorithm: str = 'md5',
     return results
 
 
-def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> Optional[str]:
+def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> Tuple[Optional[str], Optional[str]]:
     """
     Calculate RetroAchievements-compatible hash using external RAHasher tool.
     
@@ -431,14 +431,16 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
         verbose: Enable verbose output
     
     Returns:
-        RA hash string or None if RAHasher is not available or fails
+        Tuple of (hash_string, error_type) where:
+        - hash_string is the RA hash or None if failed
+        - error_type is one of: None, 'arcade', 'no_mapping', 'wrong_platform', 'not_found', 'timeout', 'other'
     """
     try:
         # Check if platform is arcade - these use special filename-based hashing
         if platform.lower() in ['arcade', 'mame', 'fba', 'neogeo']:
             if verbose:
                 print(f"      Note: Arcade ROMs use special filename-based hashing in RetroAchievements")
-            return None
+            return (None, 'arcade')
         
         # Get RAHasher system key for this platform
         canonical_platform = canonical_system(platform.lower())
@@ -447,7 +449,7 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
         if not rahasher_system:
             if verbose:
                 print(f"      No RAHasher system mapping for platform: {platform}")
-            return None
+            return (None, 'no_mapping')
         
         # Build RAHasher command with system key
         cmd = ['RAHasher', rahasher_system, str(filepath)]
@@ -470,7 +472,7 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
                         hash_value = parts[-1].strip()
                         if (hash_value and len(hash_value) == 32 and 
                             all(c in '0123456789abcdefABCDEF' for c in hash_value)):
-                            return hash_value
+                            return (hash_value, None)
             
             # Fallback: consider other colon-containing lines with hex validation
             for line in lines:
@@ -481,36 +483,42 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> O
                     hash_value = parts[-1].strip()
                     if (hash_value and len(hash_value) == 32 and
                         all(c in '0123456789abcdefABCDEF' for c in hash_value)):
-                        return hash_value
+                        return (hash_value, None)
             
             # If we can't parse, return the full output for debugging
             if verbose:
                 print(f"      RAHasher output: {result.stdout.strip()}")
-            return result.stdout.strip()
+            return (result.stdout.strip(), None)
         else:
-            # RAHasher failed - show actual error
-            error_msg = result.stderr.strip() if result.stderr.strip() else "Unknown error (no stderr output)"
+            # RAHasher failed - check if it's a platform mismatch error
+            error_msg = result.stderr.strip() if result.stderr.strip() else ""
             stdout_msg = result.stdout.strip()
+            
+            # Detect platform mismatch errors (e.g., "Not a PSP game disc")
+            error_type = 'other'
+            combined_output = (error_msg + " " + stdout_msg).lower()
+            if 'not a' in combined_output and 'game' in combined_output:
+                error_type = 'wrong_platform'
             
             if verbose:
                 print(f"      RAHasher failed (exit code {result.returncode})")
-                if error_msg != "Unknown error (no stderr output)":
+                if error_msg:
                     print(f"      Error: {error_msg}")
                 if stdout_msg:
                     print(f"      Output: {stdout_msg}")
-            return None
+            return (None, error_type)
     except FileNotFoundError:
         if verbose:
             print(f"      RAHasher not found in PATH. Please install RAHasher from RetroAchievements.")
-        return None
+        return (None, 'not_found')
     except subprocess.TimeoutExpired:
         if verbose:
             print(f"      RAHasher timed out (30s) for {filepath.name}")
-        return None
+        return (None, 'timeout')
     except Exception as e:
         if verbose:
             print(f"      RAHasher exception: {type(e).__name__}: {str(e)}")
-        return None
+        return (None, 'other')
 
 
 def calculate_ra_hashes_multithreaded(files: List[Tuple[Path, str]], 
@@ -534,10 +542,10 @@ def calculate_ra_hashes_multithreaded(files: List[Tuple[Path, str]],
         print(f"\n  Calculating RetroAchievements hashes using {max_workers} threads...")
         print(f"    Note: This requires RAHasher to be installed and in PATH")
     
-    def ra_hash_worker(filepath: Path, platform: str) -> Tuple[Path, Optional[str]]:
+    def ra_hash_worker(filepath: Path, platform: str) -> Tuple[Path, Optional[str], Optional[str]]:
         """Worker function for RA hash calculation."""
-        hash_value = calculate_ra_hash(filepath, platform, verbose=False)
-        return (filepath, hash_value)
+        hash_value, error_type = calculate_ra_hash(filepath, platform, verbose=False)
+        return (filepath, hash_value, error_type)
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all RA hash calculation jobs
@@ -549,7 +557,7 @@ def calculate_ra_hashes_multithreaded(files: List[Tuple[Path, str]],
         # Process completed hashes
         completed = 0
         for future in as_completed(future_to_file):
-            filepath, hash_value = future.result()
+            filepath, hash_value, error_type = future.result()
             completed += 1
             
             if hash_value:
@@ -571,6 +579,26 @@ def is_bios_file(filename: str) -> bool:
     return any(keyword in filename_lower for keyword in BIOS_KEYWORDS)
 
 
+def get_platforms_by_extension(extension: str) -> List[str]:
+    """
+    Get all platforms that support a given file extension.
+    Returns list of platform names, ordered by specificity (more specific first).
+    """
+    ext_lower = extension.lower()
+    platforms = []
+    
+    # Find all platforms that support this extension
+    for platform, extensions in ROM_EXTENSIONS.items():
+        if ext_lower in extensions:
+            platforms.append(platform)
+    
+    # Order by specificity - platforms with fewer extensions are more specific
+    # For example, .a26 is specific to atari2600, while .bin is shared by many
+    platforms.sort(key=lambda p: len(ROM_EXTENSIONS[p]))
+    
+    return platforms
+
+
 def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Optional[str]:
     """
     Detect the platform for a ROM file based on header signature, extension, and path.
@@ -578,7 +606,44 @@ def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Op
     Supports system aliases (e.g., 'ps1' -> 'psx', 'tg16' -> 'pcengine').
     Returns the platform name or None if unknown.
     """
-    # Check parent directory names for platform hints (highest priority)
+    ext_lower = extension.lower()
+    
+    # Check for highly specific extensions FIRST (before directory detection)
+    # These extensions are unambiguous and should override directory names
+    specific_extensions = {
+        '.a26': 'atari2600',  # Only used by Atari 2600
+        '.a78': 'atari7800',  # Only used by Atari 7800
+        '.nes': 'nes',        # NES (will be verified by header if needed)
+        '.smc': 'snes',       # SNES
+        '.sfc': 'snes',       # SNES
+        '.z64': 'n64',        # N64 big-endian
+        '.n64': 'n64',        # N64 little-endian
+        '.v64': 'n64',        # N64 byte-swapped
+        '.gba': 'gba',        # Game Boy Advance
+        '.agb': 'gba',        # Game Boy Advance alternate
+        '.gb': 'gb',          # Game Boy
+        '.sgb': 'gb',          # Super Game Boy (GB compatible)
+        '.gbc': 'gbc',        # Game Boy Color
+        '.cgb': 'gbc',        # Game Boy Color alternate
+        '.nds': 'nds',        # Nintendo DS
+        '.smd': 'genesis',    # Genesis
+        '.gen': 'genesis',    # Genesis alternate
+        '.sms': 'mastersystem', # Master System
+        '.gg': 'gamegear',    # Game Gear
+        '.pce': 'pcengine',   # PC Engine
+        '.sgx': 'pcengine',   # SuperGrafx
+        '.lnx': 'lynx',       # Atari Lynx
+        '.j64': 'jaguar',     # Atari Jaguar
+        '.jag': 'jaguar',     # Atari Jaguar alternate
+    }
+    
+    if ext_lower in specific_extensions:
+        detected_platform = specific_extensions[ext_lower]
+        if verbose:
+            print(f"    Detected as {detected_platform} based on specific extension {ext_lower}")
+        return detected_platform
+    
+    # Check parent directory names for platform hints (for ambiguous extensions)
     parent_parts = [p.lower() for p in filepath.parts]
     
     # Try to match platform from directory structure (with alias support)
@@ -591,8 +656,6 @@ def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Op
         canonical = canonical_system(part)
         if canonical in ROM_EXTENSIONS:
             return canonical
-    
-    ext_lower = extension.lower()
     
     # Handle archive files - inspect contents to detect platform
     if ext_lower in ['.zip', '.7z', '.rar']:
@@ -618,7 +681,7 @@ def detect_platform(filepath: Path, extension: str, verbose: bool = False) -> Op
         if header_platform:
             return header_platform
     
-    # For cartridge-based systems, always try header detection
+    # For cartridge-based systems with specific extensions, always try header detection
     if ext_lower in ['.nes', '.gba', '.gb', '.gbc', '.z64', '.n64', '.v64', '.smd', '.gen', '.sms']:
         header_platform = detect_platform_from_header(filepath)
         if header_platform:
@@ -795,7 +858,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 elif calculate_hashes:
                     # Calculate hash immediately if not multithreading
                     if use_ra_hash:
-                        file_hash = calculate_ra_hash(dest_path, platform, verbose)
+                        file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
                         hash_label = "RA-Hash"
                     else:
                         file_hash = calculate_hash(dest_path, hash_algorithm)
@@ -822,7 +885,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 # Dry run mode
                 if calculate_hashes and not use_multithreading:
                     if use_ra_hash:
-                        file_hash = calculate_ra_hash(filepath, platform, verbose)
+                        file_hash, error_type = calculate_ra_hash(filepath, platform, verbose)
                         hash_label = "RA-Hash"
                     else:
                         file_hash = calculate_hash(filepath, hash_algorithm)
@@ -877,7 +940,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                         files_to_hash.append((dest_path, platform))
                     elif calculate_hashes:
                         if use_ra_hash:
-                            file_hash = calculate_ra_hash(dest_path, platform, verbose)
+                            file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
                             hash_label = "RA-Hash"
                         else:
                             file_hash = calculate_hash(dest_path, hash_algorithm)
@@ -904,7 +967,7 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                     # Dry run mode
                     if calculate_hashes and not use_multithreading:
                         if use_ra_hash:
-                            file_hash = calculate_ra_hash(filepath, platform, verbose)
+                            file_hash, error_type = calculate_ra_hash(filepath, platform, verbose)
                             hash_label = "RA-Hash"
                         else:
                             file_hash = calculate_hash(filepath, hash_algorithm)
