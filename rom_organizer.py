@@ -579,7 +579,7 @@ def calculate_ra_hashes_multithreaded(files: List[Tuple[Path, str]],
 
 
 def save_hash_to_file(dest_dir: Path, platform: str, filename: str, file_hash: str, 
-                      hash_type: str, file_path: Path, is_bios: bool = False) -> None:
+                      hash_type: str, file_path: Path, is_bios: bool = False) -> Path:
     """
     Save hash information to a platform-specific hash file.
     
@@ -591,6 +591,9 @@ def save_hash_to_file(dest_dir: Path, platform: str, filename: str, file_hash: s
         hash_type: Type of hash (e.g., 'MD5', 'SHA-1', 'RA-Hash')
         file_path: Path to the file
         is_bios: Whether this is a BIOS file
+    
+    Returns:
+        Path to the hash file that was written to
     """
     # Create hash file in the platform directory
     category = 'bios' if is_bios else 'roms'
@@ -599,11 +602,65 @@ def save_hash_to_file(dest_dir: Path, platform: str, filename: str, file_hash: s
     
     # Prepare hash entry with all available information
     file_size = file_path.stat().st_size if file_path.exists() else 0
-    entry = f"{file_hash}\t{hash_type}\t{filename}\t{file_size}\t{category}\n"
+    entry = f"{file_hash} {hash_type} \"{filename}\" {file_size} {platform}_{category}\n"
     
     # Append to hash file (create if doesn't exist)
     with open(hash_file, 'a', encoding='utf-8') as f:
         f.write(entry)
+    
+    return hash_file
+
+
+def sort_and_deduplicate_hash_file(hash_file: Path) -> None:
+    """
+    Sort hash file by filename and remove duplicate entries.
+    
+    Args:
+        hash_file: Path to the hash file to sort and deduplicate
+    """
+    if not hash_file.exists():
+        return
+    
+    try:
+        # Read all lines
+        with open(hash_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        if not lines:
+            return
+        
+        # Parse lines into tuples of (filename, full_line)
+        # Format: hash hash_type "filename" size category
+        entries = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # Extract filename from quoted section
+            try:
+                # Find the quoted filename
+                start_quote = line.index('"')
+                end_quote = line.index('"', start_quote + 1)
+                filename = line[start_quote+1:end_quote]
+                entries.append((filename.lower(), line))  # Use lowercase for sorting
+            except (ValueError, IndexError):
+                # If we can't parse the line, keep it as-is
+                entries.append(('', line))
+        
+        # Sort by filename (case-insensitive) and remove duplicates
+        seen = set()
+        unique_entries = []
+        for _, line in sorted(entries, key=lambda x: x[0]):
+            if line not in seen:
+                seen.add(line)
+                unique_entries.append(line)
+        
+        # Write back sorted and deduplicated entries
+        with open(hash_file, 'w', encoding='utf-8') as f:
+            for line in unique_entries:
+                f.write(line + '\n')
+    except Exception as e:
+        print(f"Warning: Could not sort/deduplicate {hash_file}: {e}", file=sys.stderr)
 
 
 def is_bios_file(filename: str) -> bool:
@@ -860,6 +917,18 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
     # Track seen hashes for duplicate detection
     seen_hashes = {}  # hash -> (platform, filename, filepath)
     
+    # Track hash files that were written to (for sorting/deduplication)
+    hash_files_written = set()
+    
+    # Track source directories for cleanup
+    source_dirs = set()
+    for files in results['roms'].values():
+        for filepath in files:
+            source_dirs.add(filepath.parent)
+    for files in results['bios'].values():
+        for filepath in files:
+            source_dirs.add(filepath.parent)
+    
     # Organize ROMs
     print(f"\n{action} ROMs:")
     for platform, files in results['roms'].items():
@@ -878,6 +947,19 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
             if not dry_run:
                 if is_duplicate_name:
                     print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
+                    # Still calculate and save hash for existing files
+                    if calculate_hashes:
+                        if use_ra_hash:
+                            file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
+                            hash_label = "RA-Hash"
+                        else:
+                            file_hash = calculate_hash(dest_path, hash_algorithm)
+                            hash_label = hash_algorithm.upper()
+                        
+                        if file_hash:
+                            # Save hash information to file for already existing files
+                            hash_file = save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
+                            hash_files_written.add(hash_file)
                     continue
                 
                 # Pre-check with RAHasher if needed (before moving)
@@ -915,11 +997,15 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                                     dest_path.unlink()  # Delete the file we just moved
                             else:
                                 print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                                # Save hash information to file even for duplicates
+                                hash_file = save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
+                                hash_files_written.add(hash_file)
                         else:
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                             seen_hashes[file_hash] = (platform, filepath.name, dest_path)
                             # Save hash information to file
-                            save_hash_to_file(dest_root, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
+                            hash_file = save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
+                            hash_files_written.add(hash_file)
                     else:
                         print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                 else:
@@ -975,6 +1061,19 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                 if not dry_run:
                     if is_duplicate_name:
                         print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] - file already exists")
+                        # Still calculate and save hash for existing files
+                        if calculate_hashes:
+                            if use_ra_hash:
+                                file_hash, error_type = calculate_ra_hash(dest_path, platform, verbose)
+                                hash_label = "RA-Hash"
+                            else:
+                                file_hash = calculate_hash(dest_path, hash_algorithm)
+                                hash_label = hash_algorithm.upper()
+                            
+                            if file_hash:
+                                # Save hash information to file for already existing files
+                                hash_file = save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
+                                hash_files_written.add(hash_file)
                         continue
                     
                     # Pre-check with RAHasher if needed (before moving)
@@ -1011,11 +1110,15 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                                         dest_path.unlink()
                                 else:
                                     print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                                    # Save hash information to file even for duplicates
+                                    hash_file = save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
+                                    hash_files_written.add(hash_file)
                             else:
                                 print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                                 seen_hashes[file_hash] = (platform, filepath.name, dest_path)
                                 # Save hash information to file
-                                save_hash_to_file(dest_root, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
+                                hash_file = save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
+                                hash_files_written.add(hash_file)
                         else:
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] (hash calculation failed)")
                     else:
@@ -1081,16 +1184,64 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                             files_deleted += 1
                     else:
                         print(f"  ⚠️  Duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                        # Save hash information to file even for duplicates
+                        # Determine if BIOS based on path
+                        is_bios_file_path = 'bios' in str(dest_path)
+                        hash_file = save_hash_to_file(target_dir, platform, dest_path.name, file_hash, hash_label, dest_path, is_bios=is_bios_file_path)
+                        hash_files_written.add(hash_file)
                 else:
                     print(f"  {dest_path.name} [Platform: {platform.upper()}]: {file_hash}")
                     seen_hashes[file_hash] = (platform, dest_path.name, dest_path)
                     # Save hash information to file
                     # Determine if BIOS based on path
                     is_bios_file_path = 'bios' in str(dest_path)
-                    save_hash_to_file(dest_root, platform, dest_path.name, file_hash, hash_label, dest_path, is_bios=is_bios_file_path)
+                    hash_file = save_hash_to_file(target_dir, platform, dest_path.name, file_hash, hash_label, dest_path, is_bios=is_bios_file_path)
+                    hash_files_written.add(hash_file)
         
         if delete_duplicates and files_deleted > 0:
             print(f"\n🗑️  Deleted {files_deleted} duplicate file(s)")
+    
+    # Cleanup: Sort and deduplicate hash files
+    if hash_files_written and not dry_run:
+        if verbose:
+            print(f"\nSorting and deduplicating {len(hash_files_written)} hash file(s)...")
+        for hash_file in hash_files_written:
+            sort_and_deduplicate_hash_file(hash_file)
+    
+    # Cleanup: Remove empty source directories
+    if not copy_mode and not dry_run and source_dirs:
+        if verbose:
+            print("\nCleaning up empty source directories...")
+        
+        # Get the common parent directories (limit traversal depth for safety)
+        common_roots = set()
+        MAX_DEPTH = 10  # Limit how far up we traverse to avoid system directories
+        for source_dir in source_dirs:
+            # Add the directory and its parents up to MAX_DEPTH levels
+            current = source_dir
+            depth = 0
+            while current.parent != current and depth < MAX_DEPTH:
+                common_roots.add(current)
+                current = current.parent
+                depth += 1
+        
+        # Remove empty directories
+        removed_count = 0
+        # Sort by depth (deepest first) to remove children before parents
+        for dir_path in sorted(common_roots, key=lambda p: len(p.parts), reverse=True):
+            try:
+                # Check if empty (efficient check - stops at first item)
+                if dir_path.exists() and next(dir_path.iterdir(), None) is None:
+                    if verbose:
+                        print(f"  Removing empty directory: {dir_path}")
+                    dir_path.rmdir()
+                    removed_count += 1
+            except (OSError, PermissionError):
+                # Directory not empty or can't be removed
+                pass
+        
+        if removed_count > 0 and not verbose:
+            print(f"\n🗑️  Removed {removed_count} empty source director{'y' if removed_count == 1 else 'ies'}")
     
     # Report unknown files
     if results['unknown']:
