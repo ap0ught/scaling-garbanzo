@@ -247,8 +247,7 @@ ALL_ROM_EXTENSIONS = set(ext for exts in ROM_EXTENSIONS.values() for ext in exts
 EXCLUDED_DIRS_SET = {
     'imgs', 'images', 'img', 'artwork', 'art', 'covers', 'cover',
     'screenshots', 'screenshot', 'snaps', 'snap', 'preview', 'previews',
-    'videos', 'video', 'manuals', 'manual', 'docs', 'documentation',
-    'roms', 'bios'  # Exclude organized ROM/BIOS directories to prevent re-scanning already organized files
+    'videos', 'video', 'manuals', 'manual', 'docs', 'documentation'
 }
 
 # ROM header signatures for platform detection
