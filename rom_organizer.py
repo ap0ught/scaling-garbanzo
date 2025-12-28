@@ -461,52 +461,57 @@ def calculate_ra_hash(filepath: Path, platform: str, verbose: bool = False) -> T
                               text=True, 
                               timeout=30)
         
-        if result.returncode == 0:
-            # Parse RAHasher output to extract hash
-            # First, prefer the explicit "Supported Game Files" line
-            lines = result.stdout.splitlines()
-            for line in lines:
-                if 'Supported Game Files' in line:
-                    parts = line.split(':')
-                    if len(parts) >= 2:
-                        hash_value = parts[-1].strip()
-                        if (hash_value and len(hash_value) == 32 and 
-                            all(c in '0123456789abcdefABCDEF' for c in hash_value)):
-                            return (hash_value, None)
-            
-            # Fallback: consider other colon-containing lines with hex validation
-            for line in lines:
-                if ':' not in line:
-                    continue
+        # Parse RAHasher output to extract hash (try regardless of return code)
+        # First, prefer the explicit "Supported Game Files" line
+        lines = result.stdout.splitlines()
+        for line in lines:
+            if 'Supported Game Files' in line:
                 parts = line.split(':')
                 if len(parts) >= 2:
                     hash_value = parts[-1].strip()
-                    if (hash_value and len(hash_value) == 32 and
+                    if (hash_value and len(hash_value) == 32 and 
                         all(c in '0123456789abcdefABCDEF' for c in hash_value)):
                         return (hash_value, None)
-            
-            # If we can't parse, return the full output for debugging
+        
+        # Fallback: consider other colon-containing lines with hex validation
+        for line in lines:
+            if ':' not in line:
+                continue
+            parts = line.split(':')
+            if len(parts) >= 2:
+                hash_value = parts[-1].strip()
+                if (hash_value and len(hash_value) == 32 and
+                    all(c in '0123456789abcdefABCDEF' for c in hash_value)):
+                    return (hash_value, None)
+        
+        # Check if stdout itself is a valid hash (RAHasher sometimes outputs just the hash)
+        stdout_clean = result.stdout.strip()
+        if (stdout_clean and len(stdout_clean) == 32 and
+            all(c in '0123456789abcdefABCDEF' for c in stdout_clean)):
+            return (stdout_clean, None)
+        
+        # If we reach here and return code is 0, return stdout for debugging
+        if result.returncode == 0:
             if verbose:
-                print(f"      RAHasher output: {result.stdout.strip()}")
-            return (result.stdout.strip(), None)
-        else:
-            # RAHasher failed - check if it's a platform mismatch error
-            error_msg = result.stderr.strip() if result.stderr.strip() else ""
-            stdout_msg = result.stdout.strip()
-            
-            # Detect platform mismatch errors (e.g., "Not a PSP game disc")
-            error_type = 'other'
-            combined_output = (error_msg + " " + stdout_msg).lower()
-            if 'not a' in combined_output and 'game' in combined_output:
-                error_type = 'wrong_platform'
-            
-            if verbose:
-                print(f"      RAHasher failed (exit code {result.returncode})")
-                if error_msg:
-                    print(f"      Error: {error_msg}")
-                if stdout_msg:
-                    print(f"      Output: {stdout_msg}")
-            return (None, error_type)
+                print(f"      RAHasher output: {stdout_clean}")
+            return (stdout_clean, None)
+        
+        # RAHasher failed - check if it's a platform mismatch error
+        error_msg = result.stderr.strip() if result.stderr.strip() else ""
+        
+        # Detect platform mismatch errors (e.g., "Not a PSP game disc")
+        error_type = 'other'
+        combined_output = (error_msg + " " + stdout_clean).lower()
+        if 'not a' in combined_output and 'game' in combined_output:
+            error_type = 'wrong_platform'
+        
+        if verbose:
+            print(f"      RAHasher failed (exit code {result.returncode})")
+            if error_msg:
+                print(f"      Error: {error_msg}")
+            if stdout_clean:
+                print(f"      Output: {stdout_clean}")
+        return (None, error_type)
     except FileNotFoundError:
         if verbose:
             print(f"      RAHasher not found in PATH. Please install RAHasher from RetroAchievements.")
