@@ -915,6 +915,8 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                                     dest_path.unlink()  # Delete the file we just moved
                             else:
                                 print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                                # Save hash information to file even for duplicates
+                                save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=False)
                         else:
                             print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                             seen_hashes[file_hash] = (platform, filepath.name, dest_path)
@@ -1011,6 +1013,8 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                                         dest_path.unlink()
                                 else:
                                     print(f"    ⚠️  Duplicate: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                                    # Save hash information to file even for duplicates
+                                    save_hash_to_file(target_dir, platform, filepath.name, file_hash, hash_label, dest_path, is_bios=True)
                             else:
                                 print(f"    Moved: {filepath.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash})")
                                 seen_hashes[file_hash] = (platform, filepath.name, dest_path)
@@ -1081,6 +1085,10 @@ def organize_files(results: Dict, target_dir: Path, dry_run: bool = False,
                             files_deleted += 1
                     else:
                         print(f"  ⚠️  Duplicate: {dest_path.name} [Platform: {platform.upper()}] ({hash_label}: {file_hash[:16]}...) - same as {dup_file} [{dup_platform.upper()}]")
+                        # Save hash information to file even for duplicates
+                        # Determine if BIOS based on path
+                        is_bios_file_path = 'bios' in str(dest_path)
+                        save_hash_to_file(target_dir, platform, dest_path.name, file_hash, hash_label, dest_path, is_bios=is_bios_file_path)
                 else:
                     print(f"  {dest_path.name} [Platform: {platform.upper()}]: {file_hash}")
                     seen_hashes[file_hash] = (platform, dest_path.name, dest_path)
