@@ -211,7 +211,24 @@ Moving: Super Mario Bros.nes (MD5: 811b027eaf99c2def7b933c5208636de)
 Moving: Legend of Zelda.nes (SHA1: 6681ccb20167f68c60ce5f6d3e044feef78f79ab)
 ```
 
-You can then verify these hashes against RetroAchievements, Redump, or other ROM verification databases.
+You can then verify these hashes against Redump, ROM Vault, or other ROM verification databases.
+
+### RetroAchievements Hash Verification
+
+**Important**: The hash calculations above use **standard file hashing** (entire file MD5/SHA-1/SHA-256), which is different from RetroAchievements' platform-specific hashing methods.
+
+For **RetroAchievements achievement compatibility**, you need to use specialized tools like:
+- **RAHasher** (official tool) - produces exact RA hashes
+- **rcheevos** library - for custom integration
+- **RetroArch UI** - for quick visual verification
+
+📖 **See the complete guide**: [RETROACHIEVEMENTS_HASHING.md](RETROACHIEVEMENTS_HASHING.md)
+
+This guide explains:
+- How RA hashing differs from standard file hashing
+- How to use RAHasher for RA hash generation
+- When to use each hashing method
+- Integration workflows with this ROM organizer
 
 ## Platform Detection
 
@@ -447,6 +464,13 @@ Moved: rom.nes [Platform: NES]
 ```
 
 This makes it clear which platform each ROM belongs to, especially helpful when organizing large collections.
+
+## Documentation
+
+- **[QUICKSTART.md](QUICKSTART.md)** - Quick start guide with common workflows
+- **[PLATFORMS.md](PLATFORMS.md)** - Complete platform reference with all supported systems and file extensions
+- **[RETROACHIEVEMENTS_HASHING.md](RETROACHIEVEMENTS_HASHING.md)** - Guide to RetroAchievements hash verification and tools
+- **[config.json.example](config.json.example)** - Example configuration for custom platform definitions
 
 ## Contributing
 
